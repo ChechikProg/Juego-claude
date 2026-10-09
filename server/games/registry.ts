@@ -3,6 +3,7 @@ import type { GameModule } from './kit';
 import { frases } from './frases';
 import { piramide } from './piramide';
 import { smash } from './smash';
+import { tanque } from './tanque';
 import { timba } from './timba/index';
 import { vanGogh } from './vangogh';
 
@@ -18,6 +19,7 @@ export const REGISTRY: Record<GameId, GameModule<any>> = {
   smash: smash,
   piramide: piramide,
   frases: frases,
+  tanque: tanque,
 };
 
 export function getGame(id: GameId): GameModule<any> | undefined {

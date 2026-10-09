@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { PYR, PYR_TOP_Y, pyrHalfWidth } from '@shared/constants';
-import type { PiramideView, PlayerPublic } from '@shared/types';
+import type { PiramideView, PlayerPublic, PyrFx } from '@shared/types';
 import { api, serverNow } from '@/net/socket';
 import { useCountdown, useRaf, useSize } from '@/lib/hooks';
 import { sfx } from '@/lib/sfx';
@@ -27,6 +27,8 @@ export function Piramide({ view }: { view: PiramideView }): JSX.Element {
   const countdown = useCountdown(view.stage === 'countdown' ? view.until : null, 10);
   const left = useCountdown(view.stage === 'live' ? view.until : null, 4);
   const me = view.players.find((p) => p.playerId === meId);
+  const respawnIn = useCountdown(me?.dead ? me.respawnAt : null, 10);
+  const shotIn = useCountdown(me && live ? me.shotReadyAt : null, 5);
 
   /* ── sonidos ──────────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -35,6 +37,9 @@ export function Piramide({ view }: { view: PiramideView }): JSX.Element {
       seenFx.current.add(fx.id);
       if (fx.kind === 'push') sfx.smash();
       else if (fx.kind === 'land') sfx.tap();
+      else if (fx.kind === 'shot') sfx.shoot();
+      else if (fx.kind === 'blast') sfx.blast();
+      else if (fx.kind === 'stomp') sfx.stomp();
     }
     if (seenFx.current.size > 300) seenFx.current = new Set(view.fx.map((f) => f.id));
   }, [view.fx]);
@@ -53,9 +58,13 @@ export function Piramide({ view }: { view: PiramideView }): JSX.Element {
       if (k === 'ArrowLeft' || k === 'KeyA') { e.preventDefault(); move('left', true); }
       else if (k === 'ArrowRight' || k === 'KeyD') { e.preventDefault(); move('right', true); }
       else if (k === 'Space' || k === 'ArrowUp' || k === 'KeyW') { e.preventDefault(); if (live) api.send('jump'); }
-      else if (k === 'ShiftLeft' || k === 'ShiftRight' || k === 'KeyE' || k === 'ArrowDown') {
+      // Nada de Shift: spamearlo activa las teclas especiales de Windows.
+      else if (k === 'KeyJ' || k === 'KeyE' || k === 'ArrowDown' || k === 'KeyS') {
         e.preventDefault();
         if (live) api.send('push');
+      } else if (k === 'KeyK' || k === 'KeyQ') {
+        e.preventDefault();
+        if (live) api.send('shoot');
       }
     };
     const up = (e: KeyboardEvent) => {
@@ -101,6 +110,7 @@ export function Piramide({ view }: { view: PiramideView }): JSX.Element {
 
   const ranking = [...view.players].sort((a, b) => b.points - a.points);
   const pushReady = me ? serverNow() >= me.readyAt : true;
+  const shotReady = shotIn <= 0;
 
   return (
     <div className="pyr">
@@ -125,6 +135,13 @@ export function Piramide({ view }: { view: PiramideView }): JSX.Element {
               <p className="sm__ready">A escalar</p>
             </div>
           )}
+
+          {live && me?.dead && (
+            <div className="pyr__dead anim-pop">
+              <span>🥞 Te aplastaron</span>
+              <b className="tnum">Volvés al piso en {Math.max(1, Math.ceil(respawnIn / 1000))}</b>
+            </div>
+          )}
         </div>
 
         <aside className="pyr__side panel">
@@ -139,6 +156,7 @@ export function Piramide({ view }: { view: PiramideView }): JSX.Element {
                   <Avatar avatar={p.avatar} size={26} offline={!p.connected} />
                   <span className="grow prow__name">{p.name}</span>
                   {row.onTop && <span aria-label="en la cima">👑</span>}
+                  {row.dead && <span aria-label="aplastado">🥞</span>}
                   <span className="prow__score tnum">{row.points}</span>
                 </li>
               );
@@ -173,7 +191,18 @@ export function Piramide({ view }: { view: PiramideView }): JSX.Element {
           onPointerDown={(e) => { e.preventDefault(); api.send('push'); sfx.tap(); }}
         >
           <b>EMPUJAR</b>
-          <span>Shift</span>
+          <span>J</span>
+        </button>
+        <button
+          className={`pyr__btn pyr__btn--shot ${shotReady ? '' : 'pyr__btn--cooling'}`}
+          disabled={!live}
+          onPointerDown={(e) => { e.preventDefault(); api.send('shoot'); }}
+        >
+          <b>{shotReady ? 'CAÑONAZO' : `${Math.ceil(shotIn / 1000)}s`}</b>
+          <span>K</span>
+          {!shotReady && (
+            <i className="pyr__cool" style={{ width: `${(1 - shotIn / PYR.SHOT_COOLDOWN) * 100}%` }} />
+          )}
         </button>
         <button
           className="pyr__btn"
@@ -265,19 +294,49 @@ function paint(
 
   /* efectos */
   const now = serverNow();
-  for (const fx of v.fx) {
-    const age = (now - fx.at) / 1000;
-    if (age < 0 || age > 0.55) continue;
-    const t = age / 0.55;
+  for (const fx of v.fx) paintFx(ctx, fx, now, toY);
+
+  /* cañonazos */
+  for (const sh of v.shots) {
+    const ahead = Math.max(0, Math.min(0.12, (now - v.t) / 1000));
+    const x = sh.x + sh.vx * ahead;
+    const vy = sh.vy;
+    const y = toY(sh.y + sh.vy * ahead);
+    // estela de fuego, apuntando hacia atrás sobre la parábola
+    const sp = Math.hypot(sh.vx, vy) || 1;
+    const tx = x - (sh.vx / sp) * 90;
+    const ty = y + (vy / sp) * 90;
+    const nx = (-vy / sp) * PYR.SHOT_R * 0.9;
+    const ny = (-sh.vx / sp) * PYR.SHOT_R * 0.9;
+    const trail = ctx.createLinearGradient(x, y, tx, ty);
+    trail.addColorStop(0, 'rgba(255, 170, 60, 0.9)');
+    trail.addColorStop(1, 'rgba(255, 80, 40, 0)');
+    ctx.fillStyle = trail;
     ctx.beginPath();
-    ctx.arc(fx.x, toY(fx.y), 24 + t * 54, 0, Math.PI * 2);
-    ctx.lineWidth = 6 * (1 - t);
-    ctx.strokeStyle = fx.kind === 'push' ? `rgba(255, 200, 90, ${1 - t})` : `rgba(255,255,255,${(1 - t) * 0.45})`;
-    ctx.stroke();
+    ctx.moveTo(x + nx, y + ny);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(x - nx, y - ny);
+    ctx.closePath();
+    ctx.fill();
+    // bala
+    const ball = ctx.createRadialGradient(x - 4, y - 4, 2, x, y, PYR.SHOT_R);
+    ball.addColorStop(0, '#6b6b7d');
+    ball.addColorStop(1, '#16161e');
+    ctx.fillStyle = ball;
+    ctx.shadowColor = 'rgba(255, 150, 60, 0.9)';
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(x, y, PYR.SHOT_R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
   }
 
   /* jugadores */
   for (const pl of v.players) {
+    if (pl.dead) {
+      smooth.delete(pl.playerId);
+      continue;
+    }
     const p = players.get(pl.playerId);
     let sm = smooth.get(pl.playerId);
     if (!sm) {
@@ -296,7 +355,10 @@ function paint(
     const px = sm.x;
     const py = toY(sm.y + PYR.PLAYER_R);
     const isMe = pl.playerId === meId;
-    const pushing = now < pl.pushUntil;
+    const pushLeft = pl.pushUntil - now;
+    const pushing = pushLeft > 0;
+    /** 0 → 1 a lo largo del empujón (dura 220 ms) */
+    const pushT = pushing ? 1 - pushLeft / 220 : 0;
 
     /* sombra */
     ctx.beginPath();
@@ -304,28 +366,67 @@ function paint(
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fill();
 
-    /* brazo de empuje */
+    /* puño del empujón: sale disparado y vuelve, con líneas de velocidad */
     if (pushing) {
+      const ext = Math.sin(Math.min(1, pushT) * Math.PI);
+      const fx = px + pl.face * (PYR.PLAYER_R * 0.6 + ext * PYR.PLAYER_R * 1.7);
+      ctx.strokeStyle = `hsl(${p?.avatar.hue ?? 210} 60% 45%)`;
+      ctx.lineWidth = 7;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.arc(px + pl.face * PYR.PLAYER_R * 1.5, py, PYR.PLAYER_R * 0.6, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 200, 90, 0.85)';
+      ctx.moveTo(px + pl.face * PYR.PLAYER_R * 0.5, py + 3);
+      ctx.lineTo(fx, py + 2);
+      ctx.stroke();
+      for (let i = 0; i < 3; i++) {
+        const ly = py - 8 + i * 8;
+        ctx.strokeStyle = `rgba(255, 236, 170, ${0.7 * ext})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(fx - pl.face * (16 + i * 5), ly);
+        ctx.lineTo(fx - pl.face * (34 + i * 9), ly);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(fx, py + 2, PYR.PLAYER_R * 0.62, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd36b';
       ctx.fill();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#7a3d0c';
+      ctx.stroke();
+      ctx.lineWidth = 1.6;
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(fx + pl.face * 3, py + 2 + i * 4.5);
+        ctx.lineTo(fx + pl.face * 8, py + 2 + i * 4.5);
+        ctx.stroke();
+      }
     }
 
-    /* cuerpo */
+    /* cuerpo: se estira hacia el golpe y gira si lo voló un cañonazo */
+    ctx.save();
+    ctx.translate(px, py);
+    if (pl.launched) ctx.rotate(((now % 500) / 500) * Math.PI * 2 * (pl.vx >= 0 ? 1 : -1));
+    else if (pushing) {
+      const lean = Math.sin(Math.min(1, pushT) * Math.PI);
+      ctx.translate(pl.face * lean * 5, 0);
+      ctx.scale(1 + lean * 0.18, 1 - lean * 0.12);
+    }
     ctx.beginPath();
-    ctx.arc(px, py, PYR.PLAYER_R, 0, Math.PI * 2);
+    ctx.arc(0, 0, PYR.PLAYER_R, 0, Math.PI * 2);
     ctx.fillStyle = `hsl(${p?.avatar.hue ?? 210} 78% 58%)`;
     ctx.fill();
     ctx.lineWidth = isMe ? 4 : 2;
     ctx.strokeStyle = isMe ? '#ffe066' : 'rgba(0,0,0,0.4)';
     ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${Math.round(PYR.PLAYER_R * 1.25)}px serif`;
+    ctx.fillText(pl.launched ? '😵' : (p?.avatar.face ?? '🙂'), 0, 1);
+    ctx.restore();
 
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `${Math.round(PYR.PLAYER_R * 1.25)}px serif`;
-    ctx.fillText(p?.avatar.face ?? '🙂', px, py + 1);
 
     if (pl.playerId === v.leaderId) {
       ctx.font = '20px serif';
@@ -337,6 +438,101 @@ function paint(
     ctx.fillText(short(p?.name ?? '—'), px, py - PYR.PLAYER_R - (pl.playerId === v.leaderId ? 34 : 16));
     ctx.restore();
   }
+}
+
+function paintFx(ctx: CanvasRenderingContext2D, fx: PyrFx, now: number, toY: (y: number) => number): void {
+  const age = (now - fx.at) / 1000;
+  if (age < 0) return;
+  const x = fx.x;
+  const y = toY(fx.y);
+  const TAU = Math.PI * 2;
+
+  if (fx.kind === 'push' || fx.kind === 'shot') {
+    // Onda de choque en forma de medialuna hacia donde mira.
+    const life = 0.32;
+    if (age > life) return;
+    const t = age / life;
+    const dir = fx.dir ?? 1;
+    const base = dir > 0 ? 0 : Math.PI;
+    for (let i = 0; i < 3; i++) {
+      const k = Math.max(0, t - i * 0.12);
+      if (k <= 0) continue;
+      ctx.beginPath();
+      ctx.arc(x - dir * 16, y, 16 + k * 62, base - 0.85, base + 0.85);
+      ctx.lineWidth = 5 * (1 - k);
+      ctx.strokeStyle = fx.kind === 'shot' ? `rgba(255, 150, 60, ${1 - k})` : `rgba(255, 236, 170, ${(1 - k) * 0.9})`;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+    return;
+  }
+
+  if (fx.kind === 'blast') {
+    const life = 0.6;
+    if (age > life) return;
+    const t = age / life;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 30 + t * 70);
+    g.addColorStop(0, `rgba(255, 245, 200, ${1 - t})`);
+    g.addColorStop(0.4, `rgba(255, 150, 50, ${(1 - t) * 0.8})`);
+    g.addColorStop(1, 'rgba(255, 80, 40, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, 30 + t * 70, 0, TAU);
+    ctx.fill();
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * TAU + fx.id;
+      const r = 20 + t * 90;
+      ctx.fillStyle = `rgba(255, ${180 - i * 8}, 70, ${1 - t})`;
+      ctx.fillRect(x + Math.cos(a) * r - 3, y + Math.sin(a) * r - 3, 6, 6);
+    }
+    return;
+  }
+
+  if (fx.kind === 'stomp') {
+    const life = 0.9;
+    if (age > life) return;
+    const t = age / life;
+    ctx.save();
+    ctx.globalAlpha = 1 - t;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '26px serif';
+    ctx.fillText('💥', x, y - t * 20);
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i - 2) * 0.5;
+      ctx.font = '16px serif';
+      ctx.fillText('⭐', x + Math.cos(a) * (18 + t * 40), y + Math.sin(a) * (18 + t * 40));
+    }
+    ctx.restore();
+    // Panqueque: la silueta aplastada contra el piso.
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.35 * (1 - t)})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y + PYR.PLAYER_R - 3, PYR.PLAYER_R * 1.5, 5, 0, 0, TAU);
+    ctx.fill();
+    return;
+  }
+
+  if (fx.kind === 'respawn') {
+    const life = 0.8;
+    if (age > life) return;
+    const t = age / life;
+    ctx.beginPath();
+    ctx.ellipse(x, y - PYR.PLAYER_R, PYR.PLAYER_R + 10, (PYR.PLAYER_R + 10) * (1 - t), 0, 0, TAU);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = `rgba(120, 255, 220, ${1 - t})`;
+    ctx.stroke();
+    return;
+  }
+
+  // aterrizaje
+  const life = 0.55;
+  if (age > life) return;
+  const t = age / life;
+  ctx.beginPath();
+  ctx.arc(x, y, 24 + t * 54, 0, TAU);
+  ctx.lineWidth = 6 * (1 - t);
+  ctx.strokeStyle = `rgba(255,255,255,${(1 - t) * 0.45})`;
+  ctx.stroke();
 }
 
 function short(name: string): string {

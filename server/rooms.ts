@@ -1,5 +1,5 @@
 import type { Server, Socket } from 'socket.io';
-import { DEFAULT_CONFIG, GAMES, MAX_PLAYERS, ROOM_CODE_LENGTH } from '../shared/constants';
+import { DEFAULT_CONFIG, GAMES, INTRO_MS, MAX_PLAYERS, ROOM_CODE_LENGTH } from '../shared/constants';
 import type {
   Avatar, ChatMessage, GameId, PlayerPublic, RoomConfig, RoomPhase, RoomState, Standing,
 } from '../shared/types';
@@ -7,7 +7,6 @@ import { getGame } from './games/registry';
 import type { GameContext, GameModule, GamePlayer, ResultRow } from './games/kit';
 import { TimerBag, buildStandings, roomCode, sanitizeText, shortId, uid } from './util';
 
-const INTRO_MS = 7000;
 const RESULTS_MS = 13_000;
 /** agrupa los envíos de estado de juego para no saturar el socket */
 const FLUSH_MS = 40;
@@ -49,6 +48,8 @@ export class Room {
   private gameTimers = new TimerBag();
   private active: ActiveGame | null = null;
   private playlist: GameId[] = [];
+  /** quiénes ya leyeron las reglas de la intro actual */
+  private introReady = new Set<string>();
   private index = 0;
   private flushTimer: NodeJS.Timeout | null = null;
   private dirtyAll = false;
@@ -116,6 +117,8 @@ export class Room {
     } else if (this.active) {
       this.active.mod.leave?.(this.active.ctx, this.active.state, playerId);
     }
+    this.introReady.delete(playerId);
+    this.checkIntroReady();
     this.ensureHost();
     if (this.connectedPlayers.length === 0) this.emptySince = Date.now();
     this.broadcastRoom();
@@ -126,6 +129,8 @@ export class Room {
     if (!p) return;
     this.players.delete(playerId);
     if (this.active) this.active.mod.leave?.(this.active.ctx, this.active.state, playerId);
+    this.introReady.delete(playerId);
+    this.checkIntroReady();
     this.ensureHost();
     if (this.connectedPlayers.length === 0) this.emptySince = Date.now();
     this.broadcastRoom();
@@ -167,6 +172,7 @@ export class Room {
     if (patch.smashRounds !== undefined) this.config.smashRounds = int(patch.smashRounds, 1, 9, this.config.smashRounds);
     if (patch.piramideSeconds !== undefined) this.config.piramideSeconds = int(patch.piramideSeconds, 30, 600, this.config.piramideSeconds);
     if (patch.frasesRounds !== undefined) this.config.frasesRounds = int(patch.frasesRounds, 1, 8, this.config.frasesRounds);
+    if (patch.tanqueSeconds !== undefined) this.config.tanqueSeconds = int(patch.tanqueSeconds, 60, 600, this.config.tanqueSeconds);
     this.broadcastRoom();
   }
 
@@ -221,15 +227,41 @@ export class Room {
 
   private goIntro(): void {
     const gameId = this.playlist[this.index];
+    this.introReady.clear();
     this.phase = {
       kind: 'intro',
       gameId,
       index: this.index,
       total: this.playlist.length,
       endsAt: Date.now() + INTRO_MS,
+      readyIds: [],
     };
     this.broadcastRoom();
     this.matchTimers.after(INTRO_MS, () => this.beginGame());
+  }
+
+  /** Un jugador avisa que ya leyó las reglas. Si están todos, arranca. */
+  setReady(playerId: string, value: boolean): void {
+    if (this.phase.kind !== 'intro' || !this.players.has(playerId)) return;
+    if (value) this.introReady.add(playerId);
+    else this.introReady.delete(playerId);
+    this.phase = { ...this.phase, readyIds: [...this.introReady] };
+    this.broadcastRoom();
+    this.checkIntroReady();
+  }
+
+  private checkIntroReady(): void {
+    if (this.phase.kind !== 'intro') return;
+    this.phase = { ...this.phase, readyIds: [...this.introReady].filter((id) => this.players.has(id)) };
+    const everyone = this.connectedPlayers;
+    if (everyone.length === 0 || !everyone.every((p) => this.introReady.has(p.id))) return;
+    // Ya está por arrancar: no reprogramamos.
+    if (this.phase.endsAt - Date.now() <= 1300) return;
+    this.matchTimers.clear();
+    // Un respiro para que se vea que el último dio listo.
+    this.phase = { ...this.phase, endsAt: Date.now() + 1200 };
+    this.broadcastRoom();
+    this.matchTimers.after(1200, () => this.beginGame());
   }
 
   private beginGame(): void {

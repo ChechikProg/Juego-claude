@@ -2,6 +2,7 @@ import type { GameId } from '@shared/types';
 import { Frases } from './frases/Frases';
 import { Piramide } from './piramide/Piramide';
 import { Smash } from './smash/Smash';
+import { Tanque } from './tanque/Tanque';
 import { Timba } from './timba/Timba';
 import { VanGogh } from './vangogh/VanGogh';
 
@@ -15,4 +16,5 @@ export const GAME_VIEWS: Record<GameId, (props: { view: never }) => JSX.Element>
   smash: Smash as never,
   piramide: Piramide as never,
   frases: Frases as never,
+  tanque: Tanque as never,
 };

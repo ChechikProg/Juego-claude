@@ -86,6 +86,9 @@ export const api = {
   again(): void {
     socket.emit('match:again');
   },
+  ready(value: boolean): void {
+    socket.emit('match:ready', { value });
+  },
   send(type: string, data?: unknown): void {
     socket.emit('game:event', { type, data });
   },

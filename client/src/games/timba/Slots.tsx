@@ -74,70 +74,91 @@ export function Slots({ v, balance }: { v: SlotsView; balance: number }): JSX.El
 
   return (
     <div className={`sl ${v.inBonus ? 'sl--bonus' : ''}`}>
-      <header className="sl__head">
+      <div className="sl__machine">
+        <div className="sl__marquee" aria-hidden>
+          {Array.from({ length: 14 }, (_, i) => (
+            <span key={i} className={`sl__bulb ${running ? 'sl__bulb--run' : ''}`} style={{ animationDelay: `${i * 70}ms` }} />
+          ))}
+        </div>
+
+        <div className={`sl__grid ${idx === -1 ? 'sl__grid--spin' : ''}`}>
+          {Array.from({ length: SLOT_ROWS }, (_, r) =>
+            Array.from({ length: SLOT_COLS }, (_, c) => {
+              const cell = cols[c]?.[r] ?? '🍬';
+              const index = c * SLOT_ROWS + r;
+              const changed = !prev || prev.cols[c]?.[r] !== cell;
+              const isBomb = cell.startsWith(BOMB);
+              const mult = isBomb ? cell.split(':')[1] : null;
+              return (
+                <div
+                  key={changed ? `${c}-${r}-s${idx}` : `${c}-${r}`}
+                  className={[
+                    'sl__cell',
+                    winning.has(index) ? 'sl__cell--win' : '',
+                    cell === SCATTER ? 'sl__cell--scatter' : '',
+                    isBomb ? 'sl__cell--bomb' : '',
+                    changed ? 'sl__cell--drop' : '',
+                  ].join(' ')}
+                  style={{ animationDelay: changed ? `${(SLOT_ROWS - r) * 34}ms` : undefined }}
+                >
+                  {isBomb ? (
+                    <>
+                      <span className="sl__bombicon">{BOMB}</span>
+                      <span className="sl__bombmult">x{mult}</span>
+                    </>
+                  ) : (
+                    cell
+                  )}
+                </div>
+              );
+            }),
+          )}
+
+          {finished && spin.totalWin > 0 && (
+            <div className="sl__bigwin anim-pop">
+              <span className="sl__bigwin-label">
+                {spin.multiplier > 1 ? `x${spin.multiplier} · ` : ''}
+                {spin.totalWin >= spin.bet * 20 ? '¡REVENTASTE LA MÁQUINA!' : 'Ganaste'}
+              </span>
+              <span className="sl__bigwin-amt tnum">{money(spin.totalWin)}</span>
+            </div>
+          )}
+
+          {finished && spin.freeSpinsAwarded > 0 && (
+            <div className="sl__bonuswin anim-pop">
+              🍭 {spin.freeSpinsAwarded} giros gratis
+            </div>
+          )}
+        </div>
+      </div>
+
+      <aside className="sl__panel">
         <div className="sl__brand">
           <span className="sl__brandname">Dulce Bonanza</span>
           <span className="hint">8 o más iguales pagan, caigan donde caigan</span>
         </div>
+
         {v.inBonus && (
           <div className="sl__free anim-pop">
             <b>{v.freeSpinsLeft}</b> giros gratis
             {v.bonusWin > 0 && <span className="tnum"> · {money(v.bonusWin)}</span>}
           </div>
         )}
-      </header>
 
-      <div className={`sl__grid ${idx === -1 ? 'sl__grid--spin' : ''}`}>
-        {Array.from({ length: SLOT_ROWS }, (_, r) =>
-          Array.from({ length: SLOT_COLS }, (_, c) => {
-            const cell = cols[c]?.[r] ?? '🍬';
-            const index = c * SLOT_ROWS + r;
-            const changed = !prev || prev.cols[c]?.[r] !== cell;
-            const isBomb = cell.startsWith(BOMB);
-            const mult = isBomb ? cell.split(':')[1] : null;
-            return (
-              <div
-                key={changed ? `${c}-${r}-s${idx}` : `${c}-${r}`}
-                className={[
-                  'sl__cell',
-                  winning.has(index) ? 'sl__cell--win' : '',
-                  cell === SCATTER ? 'sl__cell--scatter' : '',
-                  isBomb ? 'sl__cell--bomb' : '',
-                  changed ? 'sl__cell--drop' : '',
-                ].join(' ')}
-                style={{ animationDelay: changed ? `${(SLOT_ROWS - r) * 34}ms` : undefined }}
-              >
-                {isBomb ? (
-                  <>
-                    <span className="sl__bombicon">{BOMB}</span>
-                    <span className="sl__bombmult">x{mult}</span>
-                  </>
-                ) : (
-                  cell
-                )}
-              </div>
-            );
-          }),
-        )}
+        <div className="sl__win tnum">
+          {idx >= 0 && runningWin > 0 ? (
+            <>
+              <span className="label">Premio</span>
+              <b>{money(runningWin * (finished ? spin!.multiplier : 1))}</b>
+            </>
+          ) : (
+            <>
+              <span className="label">Último premio</span>
+              <b className={v.lastWin > 0 ? '' : 'sl__win--none'}>{v.lastWin > 0 ? money(v.lastWin) : '—'}</b>
+            </>
+          )}
+        </div>
 
-        {finished && spin.totalWin > 0 && (
-          <div className="sl__bigwin anim-pop">
-            <span className="sl__bigwin-label">
-              {spin.multiplier > 1 ? `x${spin.multiplier} · ` : ''}
-              {spin.totalWin >= spin.bet * 20 ? '¡REVENTASTE LA MÁQUINA!' : 'Ganaste'}
-            </span>
-            <span className="sl__bigwin-amt tnum">{money(spin.totalWin)}</span>
-          </div>
-        )}
-
-        {finished && spin.freeSpinsAwarded > 0 && (
-          <div className="sl__bonuswin anim-pop">
-            🍭 {spin.freeSpinsAwarded} giros gratis
-          </div>
-        )}
-      </div>
-
-      <footer className="sl__foot">
         <div className="sl__bets">
           <span className="label">Apuesta</span>
           <div className="sl__betrow">
@@ -157,31 +178,19 @@ export function Slots({ v, balance }: { v: SlotsView; balance: number }): JSX.El
           </div>
         </div>
 
-        <div className="sl__spinbox">
-          <div className="sl__win tnum">
-            {idx >= 0 && runningWin > 0 ? (
-              <>
-                <span className="label">Premio</span>
-                <b>{money(runningWin * (finished ? spin!.multiplier : 1))}</b>
-              </>
-            ) : (
-              <span className="hint">{v.lastWin > 0 ? `Último: ${money(v.lastWin)}` : 'Suerte'}</span>
-            )}
-          </div>
-          <button
-            className="sl__spin"
-            disabled={!canSpin}
-            onClick={() => {
-              sfx.reel();
-              api.send('sl:spin');
-            }}
-            aria-label="Girar"
-          >
-            <span className={busy ? 'sl__spinicon sl__spinicon--on' : 'sl__spinicon'}>↻</span>
-            <span>{v.freeSpinsLeft > 0 ? 'GRATIS' : money(v.bet)}</span>
-          </button>
-        </div>
-      </footer>
+        <button
+          className="sl__spin"
+          disabled={!canSpin}
+          onClick={() => {
+            sfx.reel();
+            api.send('sl:spin');
+          }}
+          aria-label="Girar"
+        >
+          <span className={busy ? 'sl__spinicon sl__spinicon--on' : 'sl__spinicon'}>↻</span>
+          <span>{v.freeSpinsLeft > 0 ? 'GRATIS' : money(v.bet)}</span>
+        </button>
+      </aside>
     </div>
   );
 }

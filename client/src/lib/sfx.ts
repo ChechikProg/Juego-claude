@@ -109,6 +109,32 @@ export const sfx = {
     noise(0.25, 0.1, 400);
   },
 
+  /** Tanque / cañonazo */
+  shoot: () => {
+    noise(0.06, 0.12, 2200);
+    tone({ freq: 620, to: 260, dur: 0.08, type: 'square', gain: 0.08 });
+  },
+  boom: () => {
+    noise(0.45, 0.22, 120);
+    tone({ freq: 160, to: 40, dur: 0.5, type: 'sawtooth', gain: 0.18 });
+  },
+  bounce: () => tone({ freq: 1500, to: 1100, dur: 0.035, type: 'sine', gain: 0.04 }),
+  spawn: () => tone({ freq: 300, to: 900, dur: 0.22, type: 'triangle', gain: 0.1 }),
+  stomp: () => {
+    noise(0.12, 0.18, 500);
+    tone({ freq: 420, to: 90, dur: 0.22, type: 'square', gain: 0.14 });
+  },
+  blast: () => {
+    noise(0.3, 0.2, 300);
+    tone({ freq: 90, to: 260, dur: 0.18, type: 'sawtooth', gain: 0.16 });
+  },
+
+  /** Hipódromo */
+  gallop: () => noise(0.035, 0.05, 700),
+  bell: () => {
+    [880, 880, 880].forEach((f, i) => tone({ freq: f, dur: 0.12, type: 'square', gain: 0.08, delay: i * 0.16 }));
+  },
+
   /** Casino */
   card: () => noise(0.07, 0.1, 2400),
   coin: () => {

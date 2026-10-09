@@ -1,5 +1,6 @@
 import { PYR, PYR_TOP_Y, pyrHalfWidth, pyrHeightAt } from '../../shared/constants';
-import type { PiramideView, PyrFx, PyrPlayer } from '../../shared/types';
+import type { PiramideView, PyrFx, PyrPlayer, PyrShot } from '../../shared/types';
+import { rnd } from '../util';
 import type { GameContext, GameModule } from './kit';
 
 const COUNTDOWN_MS = 3200;
@@ -16,15 +17,27 @@ interface Body {
   points: number;
   pushUntil: number;
   readyAt: number;
+  shotReadyAt: number;
+  dead: boolean;
+  respawnAt: number;
+  /** sin control ni tope de velocidad hasta acá (cañonazo) */
+  launchedUntil: number;
   input: { left: boolean; right: boolean };
   jumpQueued: boolean;
   pushQueued: boolean;
+  shotQueued: boolean;
+}
+
+interface Shot extends PyrShot {
+  bornAt: number;
 }
 
 interface PyrState {
   stage: 'countdown' | 'live' | 'done';
   until: number;
   bodies: Map<string, Body>;
+  shots: Shot[];
+  shotSeq: number;
   fx: PyrFx[];
   fxSeq: number;
   lastTick: number;
@@ -46,10 +59,30 @@ function spawn(playerId: string, i: number, total: number): Body {
     points: 0,
     pushUntil: 0,
     readyAt: 0,
+    shotReadyAt: 0,
+    dead: false,
+    respawnAt: 0,
+    launchedUntil: 0,
     input: { left: false, right: false },
     jumpQueued: false,
     pushQueued: false,
+    shotQueued: false,
   };
+}
+
+/** Reaparece en el piso, en uno de los dos costados de la pirámide. */
+function respawn(b: Body): void {
+  const edge = PYR.W / 2 - PYR.BASE_HALF - PYR.PLAYER_R * 2;
+  const off = PYR.PLAYER_R + rnd() * Math.max(1, edge - PYR.PLAYER_R);
+  const leftSide = rnd() < 0.5;
+  b.x = leftSide ? off : PYR.W - off;
+  b.y = 0;
+  b.vx = 0;
+  b.vy = 0;
+  b.face = leftSide ? 1 : -1;
+  b.grounded = true;
+  b.dead = false;
+  b.launchedUntil = 0;
 }
 
 function levelOf(y: number): number {
@@ -76,6 +109,8 @@ export const piramide: GameModule<PyrState> = {
       stage: 'countdown',
       until: 0,
       bodies,
+      shots: [],
+      shotSeq: 1,
       fx: [],
       fxSeq: 1,
       lastTick: 0,
@@ -95,6 +130,8 @@ export const piramide: GameModule<PyrState> = {
   event(ctx, s, playerId, type, data) {
     const b = s.bodies.get(playerId);
     if (!b || s.stage !== 'live') return;
+    // Muerto sólo se le guarda hacia dónde quiere ir, para cuando reaparezca.
+    if (b.dead && type !== 'left' && type !== 'right' && type !== 'stop') return;
     const d = (data ?? {}) as { down?: boolean };
 
     switch (type) {
@@ -115,6 +152,9 @@ export const piramide: GameModule<PyrState> = {
         return;
       case 'push':
         b.pushQueued = true;
+        return;
+      case 'shoot':
+        b.shotQueued = true;
         return;
     }
   },
@@ -138,21 +178,33 @@ export const piramide: GameModule<PyrState> = {
     const bodies = [...s.bodies.values()];
 
     for (const b of bodies) {
+      if (b.dead) {
+        if (t >= b.respawnAt) {
+          respawn(b);
+          addFx(s, 'respawn', b.x, b.y, t);
+        }
+        continue;
+      }
+      const launched = t < b.launchedUntil;
+
       /* ── horizontal ── */
-      const dir = (b.input.right ? 1 : 0) - (b.input.left ? 1 : 0);
+      const dir = launched ? 0 : (b.input.right ? 1 : 0) - (b.input.left ? 1 : 0);
       if (dir !== 0) {
         b.vx += dir * PYR.ACCEL * dt;
         b.face = dir as -1 | 1;
       } else {
-        const damp = b.grounded ? PYR.GROUND_FRICTION : PYR.AIR_FRICTION;
+        const damp = launched ? 0.6 : b.grounded ? PYR.GROUND_FRICTION : PYR.AIR_FRICTION;
         b.vx *= Math.pow(damp, dt);
       }
-      b.vx = Math.max(-PYR.MAX_VX, Math.min(PYR.MAX_VX, b.vx));
+      if (!launched && Math.abs(b.vx) > PYR.MAX_VX) {
+        // Pasado el vuelo frena rápido hasta la velocidad normal, sin cortarla de golpe.
+        b.vx = Math.sign(b.vx) * Math.max(PYR.MAX_VX, Math.abs(b.vx) * Math.pow(0.03, dt));
+      }
 
       /* ── salto ── */
       if (b.jumpQueued) {
         b.jumpQueued = false;
-        if (b.grounded) {
+        if (b.grounded && !launched) {
           b.vy = PYR.JUMP_V;
           b.grounded = false;
         }
@@ -164,9 +216,9 @@ export const piramide: GameModule<PyrState> = {
         if (t >= b.readyAt) {
           b.readyAt = t + PYR.PUSH_COOLDOWN;
           b.pushUntil = t + 220;
-          addFx(s, 'push', b.x + b.face * 26, b.y + 26, t);
+          addFx(s, 'push', b.x + b.face * 26, b.y + PYR.PLAYER_R, t, b.face);
           for (const other of bodies) {
-            if (other === b) continue;
+            if (other === b || other.dead) continue;
             const dx = other.x - b.x;
             const dy = other.y - b.y;
             const dist = Math.hypot(dx, dy);
@@ -178,6 +230,29 @@ export const piramide: GameModule<PyrState> = {
             other.vy += PYR.PUSH_LIFT * (0.5 + falloff * 0.8);
             other.grounded = false;
           }
+        }
+      }
+
+      /* ── cañonazo ── */
+      if (b.shotQueued) {
+        b.shotQueued = false;
+        if (t >= b.shotReadyAt) {
+          b.shotReadyAt = t + PYR.SHOT_COOLDOWN;
+          const elev = aimElevation(b, bodies);
+          const x = b.x + b.face * Math.cos(elev) * (PYR.PLAYER_R + PYR.SHOT_R + 2);
+          const y = b.y + PYR.PLAYER_R + Math.sin(elev) * (PYR.PLAYER_R + PYR.SHOT_R + 2);
+          s.shots.push({
+            id: s.shotSeq++,
+            x,
+            y,
+            vx: b.face * Math.cos(elev) * PYR.SHOT_SPEED,
+            vy: Math.sin(elev) * PYR.SHOT_SPEED,
+            owner: b.playerId,
+            bornAt: t,
+          });
+          // Retroceso del cañón.
+          b.vx -= b.face * 120;
+          addFx(s, 'shot', x, y, t, b.face);
         }
       }
 
@@ -220,11 +295,30 @@ export const piramide: GameModule<PyrState> = {
       for (let j = i + 1; j < bodies.length; j++) {
         const a = bodies[i];
         const b = bodies[j];
+        if (a.dead || b.dead) continue;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.hypot(dx, dy) || 0.001;
         const min = PYR.PLAYER_R * 2;
         if (dist >= min) continue;
+
+        // Pisotón: el de arriba le cae en la cabeza al de abajo.
+        const top = a.y > b.y ? a : b;
+        const under = top === a ? b : a;
+        if (
+          top.y - under.y > PYR.PLAYER_R * 1.05 &&
+          Math.abs(top.x - under.x) < PYR.PLAYER_R * 1.6 &&
+          top.vy - under.vy < -40
+        ) {
+          under.dead = true;
+          under.respawnAt = t + PYR.RESPAWN_MS;
+          under.vx = 0;
+          under.vy = 0;
+          top.vy = PYR.STOMP_BOUNCE;
+          top.grounded = false;
+          addFx(s, 'stomp', under.x, under.y + PYR.PLAYER_R, t);
+          continue;
+        }
 
         const nxv = dx / dist;
         const nyv = dy / dist;
@@ -248,9 +342,40 @@ export const piramide: GameModule<PyrState> = {
       }
     }
 
+    /* ── cañonazos en vuelo ── */
+    if (s.shots.length) {
+      const gone = new Set<number>();
+      for (const sh of s.shots) {
+        // Vuela por delante de la pirámide: sólo lo frena el piso.
+        sh.x += sh.vx * dt;
+        sh.y += sh.vy * dt;
+        const expired = t - sh.bornAt > PYR.SHOT_TTL || sh.x < -40 || sh.x > PYR.W + 40 || sh.y > PYR_TOP_Y + 400;
+        const ground = sh.y < PYR.SHOT_R * 0.5;
+        if (expired || ground) {
+          gone.add(sh.id);
+          if (ground) addFx(s, 'blast', sh.x, sh.y, t);
+          continue;
+        }
+        for (const b of bodies) {
+          if (b.dead || b.playerId === sh.owner) continue;
+          const d = Math.hypot(b.x - sh.x, b.y + PYR.PLAYER_R - sh.y);
+          if (d > PYR.PLAYER_R + PYR.SHOT_R) continue;
+          const dir = Math.sign(sh.vx) || 1;
+          b.vx = dir * PYR.SHOT_FORCE;
+          b.vy = PYR.SHOT_LIFT;
+          b.grounded = false;
+          b.launchedUntil = t + PYR.LAUNCH_MS;
+          gone.add(sh.id);
+          addFx(s, 'blast', sh.x, sh.y, t);
+          break;
+        }
+      }
+      if (gone.size) s.shots = s.shots.filter((sh) => !gone.has(sh.id));
+    }
+
     /* ── puntos de la cima ── */
     for (const b of bodies) {
-      if (isOnTop(b)) b.points += PYR.POINTS_PER_SEC * dt;
+      if (!b.dead && isOnTop(b)) b.points += PYR.POINTS_PER_SEC * dt;
     }
 
     if (s.fx.length && t - s.fx[0].at > FX_TTL) s.fx = s.fx.filter((f) => t - f.at <= FX_TTL);
@@ -285,10 +410,14 @@ export const piramide: GameModule<PyrState> = {
         face: b.face,
         grounded: b.grounded,
         level: levelOf(b.y),
-        onTop: isOnTop(b),
+        onTop: !b.dead && isOnTop(b),
         points: Math.floor(b.points),
         pushUntil: b.pushUntil,
         readyAt: b.readyAt,
+        shotReadyAt: b.shotReadyAt,
+        dead: b.dead,
+        respawnAt: b.respawnAt,
+        launched: ctx.now() < b.launchedUntil,
       });
     }
     return {
@@ -296,14 +425,35 @@ export const piramide: GameModule<PyrState> = {
       t: ctx.now(),
       until: s.stage === 'countdown' ? s.until : s.endsAt,
       players,
+      shots: s.shots.map((sh) => ({ id: sh.id, x: Math.round(sh.x), y: Math.round(sh.y), vx: sh.vx, vy: Math.round(sh.vy), owner: sh.owner })),
       fx: s.fx,
       leaderId: best > 0 ? leaderId : null,
     };
   },
 };
 
-function addFx(s: PyrState, kind: PyrFx['kind'], x: number, y: number, at: number): void {
-  s.fx.push({ id: s.fxSeq++, kind, x, y, at });
+/** Ángulo de tiro hacia el rival más cercano que tenga adelante; 0 si no hay nadie a tiro. */
+function aimElevation(b: Body, bodies: Body[]): number {
+  let best = 0;
+  let bestDist = Infinity;
+  for (const o of bodies) {
+    if (o === b || o.dead) continue;
+    const dx = (o.x - b.x) * b.face;
+    const dy = o.y - b.y;
+    if (dx <= 0) continue;
+    const dist = Math.hypot(dx, dy);
+    const elev = Math.atan2(dy, dx);
+    if (dist > PYR.SHOT_AIM_RANGE || Math.abs(elev) > PYR.SHOT_AIM_CONE) continue;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = elev;
+    }
+  }
+  return best;
+}
+
+function addFx(s: PyrState, kind: PyrFx['kind'], x: number, y: number, at: number, dir?: -1 | 1): void {
+  s.fx.push({ id: s.fxSeq++, kind, x, y, at, dir });
   if (s.fx.length > 16) s.fx.shift();
 }
 

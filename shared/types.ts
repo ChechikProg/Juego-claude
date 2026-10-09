@@ -3,7 +3,7 @@
  *  Todo lo que viaja por el socket está tipado acá.
  * ────────────────────────────────────────────────────────────────────────── */
 
-export type GameId = 'vangogh' | 'timba' | 'smash' | 'piramide' | 'frases';
+export type GameId = 'vangogh' | 'timba' | 'smash' | 'piramide' | 'frases' | 'tanque';
 
 export interface Avatar {
   /** 0-359, define el gradiente del avatar */
@@ -39,7 +39,15 @@ export interface Standing {
 
 export type RoomPhase =
   | { kind: 'lobby' }
-  | { kind: 'intro'; gameId: GameId; index: number; total: number; endsAt: number }
+  | {
+      kind: 'intro';
+      gameId: GameId;
+      index: number;
+      total: number;
+      endsAt: number;
+      /** jugadores que ya leyeron las reglas; si están todos, arranca */
+      readyIds: string[];
+    }
   | { kind: 'playing'; gameId: GameId; index: number; total: number }
   | { kind: 'results'; gameId: GameId; index: number; total: number; standings: Standing[]; endsAt: number }
   | { kind: 'final'; standings: Standing[] };
@@ -52,6 +60,7 @@ export interface RoomConfig {
   smashRounds: number;
   piramideSeconds: number;
   frasesRounds: number;
+  tanqueSeconds: number;
 }
 
 export interface RoomState {
@@ -142,7 +151,7 @@ export type VanGoghView =
 
 /* ─────────────────────────────── 2. VIVA LA TIMBA ────────────────────────── */
 
-export type TimbaTable = 'hub' | 'blackjack' | 'roulette' | 'slots';
+export type TimbaTable = 'hub' | 'blackjack' | 'roulette' | 'slots' | 'horses';
 
 export interface Card {
   s: 'S' | 'H' | 'D' | 'C';
@@ -239,6 +248,30 @@ export interface SlotsView {
   bonusWin: number;
 }
 
+/** Recorrido de un caballo: posiciones 0..1 en cada instante (ms desde la largada). */
+export interface HorseTrack {
+  t: number[];
+  p: number[];
+}
+
+export interface HorsesView {
+  phase: 'pick' | 'racing' | 'result';
+  /** caballo elegido (0..5) */
+  horse: number | null;
+  bet: number;
+  race: {
+    /** timestamp de servidor de la largada */
+    startAt: number;
+    /** cuando el ganador cruza la meta */
+    finishAt: number;
+    winner: number;
+    tracks: HorseTrack[];
+  } | null;
+  lastNet: number | null;
+  /** ganadores de las últimas carreras */
+  history: number[];
+}
+
 export interface TimbaFeedItem {
   id: string;
   playerId: string;
@@ -259,6 +292,7 @@ export interface TimbaView {
   bj: BlackjackView;
   rl: RouletteView;
   sl: SlotsView;
+  hr: HorsesView;
 }
 
 /* ──────────────────────────────── 3. SMASH 360 ───────────────────────────── */
@@ -331,6 +365,7 @@ export interface ClientToServer {
   'match:start': () => void;
   'match:skip': () => void;
   'match:again': () => void;
+  'match:ready': (p: { value: boolean }) => void;
   'game:event': (p: { type: string; data?: unknown }) => void;
   'chat:send': (p: { text: string }) => void;
   'time:ping': (p: { t0: number; rtt?: number }, cb: (a: { t0: number; ts: number }) => void) => void;
@@ -363,14 +398,33 @@ export interface PyrPlayer {
   pushUntil: number;
   /** timestamp en el que se puede volver a empujar */
   readyAt: number;
+  /** timestamp en el que se puede volver a disparar el cañonazo */
+  shotReadyAt: number;
+  /** aplastado: no está en el mapa hasta `respawnAt` */
+  dead: boolean;
+  respawnAt: number;
+  /** volando por un cañonazo */
+  launched: boolean;
+}
+
+export interface PyrShot {
+  id: number;
+  x: number;
+  y: number;
+  /** velocidad horizontal (signo = dirección) */
+  vx: number;
+  vy: number;
+  owner: string;
 }
 
 export interface PyrFx {
   id: number;
-  kind: 'push' | 'land' | 'crown';
+  kind: 'push' | 'land' | 'crown' | 'stomp' | 'blast' | 'respawn' | 'shot';
   x: number;
   y: number;
   at: number;
+  /** dirección del efecto (empujón) */
+  dir?: -1 | 1;
 }
 
 export interface PiramideView {
@@ -380,6 +434,7 @@ export interface PiramideView {
   /** fin de la fase actual */
   until: number;
   players: PyrPlayer[];
+  shots: PyrShot[];
   fx: PyrFx[];
   /** id del que más puntos lleva */
   leaderId: string | null;
@@ -431,3 +486,62 @@ export type FrasesView =
       answers: FraseAnswer[];
       totals: Record<string, number>;
     };
+
+/* ───────────────────────────── 6. EL TANQUE JUAN ─────────────────────────── */
+
+export interface TankPublic {
+  playerId: string;
+  x: number;
+  y: number;
+  /** ángulo del casco, radianes */
+  a: number;
+  /** ángulo de la torreta */
+  ta: number;
+  alive: boolean;
+  respawnAt: number;
+  /** invulnerable hasta acá (recién aparecido) */
+  shieldUntil: number;
+  /** timestamp en el que puede volver a disparar */
+  readyAt: number;
+  score: number;
+  kills: number;
+  deaths: number;
+}
+
+export interface TankBullet {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  owner: string;
+}
+
+export interface TankFx {
+  id: number;
+  kind: 'shot' | 'boom' | 'spawn' | 'bounce';
+  x: number;
+  y: number;
+  at: number;
+  playerId?: string;
+}
+
+export interface TankKill {
+  id: number;
+  killer: string;
+  victim: string;
+  at: number;
+}
+
+export interface TanqueView {
+  stage: 'countdown' | 'live' | 'done';
+  /** reloj del servidor en el snapshot */
+  t: number;
+  until: number;
+  /** semilla del laberinto: cliente y servidor lo generan igual */
+  seed: number;
+  tanks: TankPublic[];
+  bullets: TankBullet[];
+  fx: TankFx[];
+  feed: TankKill[];
+}

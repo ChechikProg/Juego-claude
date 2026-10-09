@@ -7,6 +7,7 @@ import { useCountdown, useRollingNumber } from '@/lib/hooks';
 import { usePlayerMap, useStore } from '@/state/store';
 import { Avatar, RankBadge, Timer } from '@/components/ui';
 import { Blackjack } from './Blackjack';
+import { Horses } from './Horses';
 import { Roulette } from './Roulette';
 import { Slots } from './Slots';
 
@@ -14,6 +15,7 @@ const TABLES: { id: TimbaTable; name: string; icon: string; blurb: string }[] = 
   { id: 'blackjack', name: 'Blackjack', icon: '🂡', blurb: 'Llegá a 21 sin pasarte. Paga 3 a 2.' },
   { id: 'roulette', name: 'Ruleta', icon: '🎡', blurb: 'Un solo cero. El pleno paga 35 a 1.' },
   { id: 'slots', name: 'Dulce Bonanza', icon: '🍭', blurb: 'Cluster pays, tumbles y giros gratis.' },
+  { id: 'horses', name: 'Hipódromo', icon: '🏇', blurb: 'Seis caballos, elegí uno. Si gana paga x6.' },
 ];
 
 export function Timba({ view }: { view: TimbaView }): JSX.Element {
@@ -78,6 +80,7 @@ export function Timba({ view }: { view: TimbaView }): JSX.Element {
           {view.table === 'blackjack' && <Blackjack v={view.bj} balance={view.balance} />}
           {view.table === 'roulette' && <Roulette v={view.rl} balance={view.balance} />}
           {view.table === 'slots' && <Slots v={view.sl} balance={view.balance} />}
+          {view.table === 'horses' && <Horses v={view.hr} balance={view.balance} />}
 
           {broke && view.table !== 'hub' && (
             <div className="tb__bailout anim-pop">

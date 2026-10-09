@@ -9,9 +9,10 @@ seguidos y gana el que más puntos junte: cada minijuego reparte **10 / 5 / 3**.
 | | Juego | De qué va |
 |---|---|---|
 | 🎨 | **Vicente van Gogh** | Se sortea una palabra, todos la dibujan en 2 minutos (o menos si todos dan LISTO) y después se votan los dibujos de 1 a 5 estrellas, estilo build battle. |
-| 🎰 | **Viva la Timba** | Arrancás con $1.000. Blackjack, ruleta europea y un tragamonedas de caramelos con cluster pays, tumbles, scatters y giros gratis. Gana el que más plata tenga al final. |
+| 🎰 | **Viva la Timba** | Arrancás con $1.000. Blackjack, ruleta europea, un tragamonedas de caramelos con cluster pays, tumbles y giros gratis, y un hipódromo de 6 caballos que paga x6 (cada uno ve su propia carrera). Gana el que más plata tenga al final. |
 | 🏓 | **Smash 360** | Estás fijo en el borde de un círculo con una pelota orbitando. Agachate para esquivarla o pegale para devolverla más rápido. Si te toca parado, afuera. |
-| 🏔️ | **Pirámide** | Todos arrancan en el piso de una pirámide de escalones cada vez más chicos. Mientras estés en la punta sumás puntos. Se puede saltar y empujar fuerte. |
+| 🏔️ | **Pirámide** | Todos arrancan en el piso de una pirámide de escalones cada vez más chicos. Mientras estés en la punta sumás puntos. Se puede saltar, empujar, aplastar al de abajo cayéndole encima y tirar un cañonazo que saca volando (cada 7 s). |
+| 💥 | **El Tanque Juan** | Tanques en un laberinto visto desde arriba. Las balas rebotan en las paredes y también te matan a vos. Matar suma 1, morir resta 1. |
 | 💬 | **Frases Chupete** | Aparece una frase con un hueco, todos la completan en 1 minuto y después se vota en anónimo cuál fue la mejor. Cada voto vale un punto. |
 
 ## Cómo correrlo

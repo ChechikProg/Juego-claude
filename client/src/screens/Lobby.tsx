@@ -224,6 +224,18 @@ function Settings({ id, isHost }: { id: GameId; isHost: boolean }): JSX.Element 
       />
     );
   }
+  if (id === 'tanque') {
+    return (
+      <Stepper
+        label="min"
+        value={Math.round(config.tanqueSeconds / 60)}
+        min={1}
+        max={10}
+        disabled={!isHost}
+        onChange={(v) => step({ tanqueSeconds: v * 60 })}
+      />
+    );
+  }
   return null;
 }
 

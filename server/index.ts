@@ -190,6 +190,12 @@ io.on('connection', (socket) => {
     s?.room.skip(s.playerId);
   });
 
+  socket.on('match:ready', (raw) => {
+    const s = hub.session(socket.id);
+    if (!s || !limits.lobby.take()) return;
+    s.room.setReady(s.playerId, (raw ?? {}).value !== false);
+  });
+
   socket.on('match:again', () => {
     const s = hub.session(socket.id);
     s?.room.playAgain(s.playerId);

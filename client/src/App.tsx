@@ -75,7 +75,13 @@ function Body(): JSX.Element {
   if (phase.kind === 'intro') {
     return (
       <main className="shell">
-        <GameIntro gameId={phase.gameId} index={phase.index} total={phase.total} endsAt={phase.endsAt} />
+        <GameIntro
+          gameId={phase.gameId}
+          index={phase.index}
+          total={phase.total}
+          endsAt={phase.endsAt}
+          readyIds={phase.readyIds ?? []}
+        />
       </main>
     );
   }

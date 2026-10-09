@@ -1,10 +1,11 @@
-import { BJ_MIN_BET, START_BALANCE, money } from '../../../shared/constants';
+import { BJ_MIN_BET, HORSES, HORSE_RESULT_MS, START_BALANCE, money } from '../../../shared/constants';
 import type { TimbaFeedItem, TimbaTable, TimbaView } from '../../../shared/types';
 import { shortId } from '../../util';
 import type { GameContext, GameModule } from '../kit';
 import { bjAction, bjCreate, bjDeal, bjReset, bjSettle, bjView, type BjAction, type BjState } from './blackjack';
 import { RESULT_MS, SPIN_MS, rlAddBet, rlClear, rlCreate, rlFinishSpin, rlNewRound, rlParseBet, rlSpin, rlUndo, rlView, type RlState } from './roulette';
 import { slCreate, slSpin, slView, type SlState } from './slots';
+import { hrCreate, hrFinish, hrNewRound, hrPick, hrRun, hrSetBet, hrView, type HrState } from './horses';
 
 const SLOT_BETS = [5, 10, 20, 50, 100, 200, 500];
 const BAILOUT_AMOUNT = 150;
@@ -27,6 +28,7 @@ interface Seat {
   bj: BjState;
   rl: RlState;
   sl: SlState;
+  hr: HrState;
   bailouts: number;
   pending: Pending[];
 }
@@ -47,6 +49,7 @@ function newSeat(): Seat {
     bj: bjCreate(),
     rl: rlCreate(),
     sl: slCreate(),
+    hr: hrCreate(),
     bailouts: 0,
     pending: [],
   };
@@ -125,7 +128,7 @@ export const timba: GameModule<TimbaState> = {
       /* ── navegación ───────────────────────────────────────────────── */
       case 'table': {
         const t = d.t as TimbaTable;
-        if (t === 'hub' || t === 'blackjack' || t === 'roulette' || t === 'slots') {
+        if (t === 'hub' || t === 'blackjack' || t === 'roulette' || t === 'slots' || t === 'horses') {
           seat.table = t;
           ctx.pushTo(playerId);
         }
@@ -134,7 +137,7 @@ export const timba: GameModule<TimbaState> = {
 
       case 'bailout': {
         if (seat.balance >= BAILOUT_THRESHOLD || seat.bailouts >= BAILOUT_MAX) return;
-        if (seat.rl.phase === 'spinning' || seat.bj.phase === 'player') return;
+        if (seat.rl.phase === 'spinning' || seat.bj.phase === 'player' || seat.hr.phase === 'racing') return;
         seat.bailouts += 1;
         credit(seat, BAILOUT_AMOUNT);
         ctx.toast(playerId, `El tío te presta ${money(BAILOUT_AMOUNT)}. Van ${seat.bailouts}/${BAILOUT_MAX}.`, 'info');
@@ -233,6 +236,45 @@ export const timba: GameModule<TimbaState> = {
         return;
       }
 
+      /* ── hipódromo ─────────────────────────────────────────────────── */
+      case 'hr:pick': {
+        if (hrPick(seat.hr, d.horse)) ctx.pushTo(playerId);
+        return;
+      }
+
+      case 'hr:bet': {
+        if (hrSetBet(seat.hr, d.amount)) ctx.pushTo(playerId);
+        return;
+      }
+
+      case 'hr:run': {
+        const hr = seat.hr;
+        if (hr.phase === 'result') hrNewRound(hr);
+        if (hr.phase !== 'pick' || hr.horse === null) return;
+        if (seat.balance < hr.bet) {
+          ctx.toast(playerId, 'No te alcanza para esa apuesta.', 'bad');
+          return;
+        }
+        if (!spend(seat, hr.bet)) return;
+        const bet = hr.bet;
+        const { winner, credit: win, finishInMs } = hrRun(hr, ctx.now());
+        payLater(ctx, s, seat, win, finishInMs, () => {
+          hrFinish(hr);
+          const net = win - bet;
+          if (net >= FEED_MIN_WIN) {
+            announce(s, playerId, `la pegó con ${HORSES[winner].name} en el hipódromo`, net, net >= 1500 ? 'mega' : 'win');
+          }
+          ctx.timers.after(HORSE_RESULT_MS + 2600, () => {
+            if (hr.phase === 'result') {
+              hrNewRound(hr);
+              ctx.pushTo(playerId);
+            }
+          });
+        });
+        ctx.push();
+        return;
+      }
+
       /* ── tragamonedas ─────────────────────────────────────────────── */
       case 'sl:bet': {
         if (ctx.now() < seat.sl.busyUntil || seat.sl.freeSpinsLeft > 0) return;
@@ -279,6 +321,7 @@ export const timba: GameModule<TimbaState> = {
       bj: bjView(seat.bj),
       rl: rlView(seat.rl),
       sl: slView(seat.sl),
+      hr: hrView(seat.hr),
     };
   },
 

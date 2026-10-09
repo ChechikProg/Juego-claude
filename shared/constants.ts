@@ -45,7 +45,7 @@ export const GAMES: Record<GameId, GameMeta> = {
     ink: '#06130D',
     howTo: [
       'Arrancás con $1.000 y tenés el casino abierto hasta que suene la campana.',
-      'Blackjack, ruleta europea y un tragamonedas de caramelos con tumbles y free spins.',
+      'Blackjack, ruleta europea, un tragamonedas de caramelos y el hipódromo con 6 caballos que paga x6.',
       'Todo lo resuelve el servidor: nadie puede hacer trampa con el RNG.',
       'El que más plata tenga al final se lleva 10 puntos, el segundo 5 y el tercero 3.',
     ],
@@ -75,7 +75,8 @@ export const GAMES: Record<GameId, GameMeta> = {
     ink: '#2A1203',
     howTo: [
       'Todos arrancan en el piso. Arriba de todo hay un escalón para uno solo.',
-      'Mové con ← →, saltá con ESPACIO y empujá con SHIFT. El empuje pega fuerte.',
+      'Mové con ← →, saltá con ESPACIO, empujá con J y tirá un cañonazo con K: apunta solo al rival que tengas adelante y lo saca volando (uno cada 7 segundos).',
+      'Si le caés en la cabeza a alguien lo aplastás: vuelve al piso en 5 segundos.',
       'Mientras estés en la punta sumás puntos cada segundo.',
       'Dos minutos. El que más puntos junte se lleva 10, el segundo 5 y el tercero 3.',
     ],
@@ -96,19 +97,38 @@ export const GAMES: Record<GameId, GameMeta> = {
     ],
     minPlayers: 2,
   },
+  tanque: {
+    id: 'tanque',
+    title: 'El Tanque Juan',
+    subtitle: 'Laberinto, balas que rebotan y nadie a salvo',
+    icon: '💥',
+    accent: ['#A3E635', '#F97316'],
+    ink: '#14200A',
+    howTo: [
+      'Todos son tanques en un laberinto visto desde arriba y aparecen en lugares al azar.',
+      'Movete con WASD o las flechas, apuntá con el mouse y disparás con click o ESPACIO.',
+      'Las balas rebotan en las paredes y también te matan a vos. Cuidado con los rebotes.',
+      'Matar suma 1 punto y morir resta 1. Revivís a los 3 segundos. Cuando se acaba el tiempo, el que más puntos tenga gana.',
+    ],
+    minPlayers: 1,
+  },
 };
 
 /** Orden en el que se muestran en el lobby. */
-export const GAME_ORDER: GameId[] = ['vangogh', 'timba', 'smash', 'piramide', 'frases'];
+export const GAME_ORDER: GameId[] = ['vangogh', 'timba', 'smash', 'piramide', 'frases', 'tanque'];
 
 export const DEFAULT_CONFIG: RoomConfig = {
-  playlist: ['vangogh', 'timba', 'smash', 'piramide', 'frases'],
+  playlist: ['vangogh', 'timba', 'smash', 'piramide', 'frases', 'tanque'],
   vangoghRounds: 2,
   timbaSeconds: 300,
   smashRounds: 3,
   piramideSeconds: 120,
   frasesRounds: 3,
+  tanqueSeconds: 180,
 };
+
+/** Tiempo para leer las reglas antes de cada minijuego (se corta si todos dan listo). */
+export const INTRO_MS = 30_000;
 
 export const AVATAR_FACES = [
   '😎', '🤠', '🥸', '🤡', '👽', '🤖', '🐶', '🐱', '🦊', '🐸',
@@ -199,6 +219,23 @@ export function clamp(n: number, lo: number, hi: number): number {
   return n < lo ? lo : n > hi ? hi : n;
 }
 
+/* ── Hipódromo ────────────────────────────────────────────────────────────── */
+
+export const HORSES: { name: string; color: string; silk: string }[] = [
+  { name: 'Relámpago', color: '#FF4D6D', silk: '#FFE066' },
+  { name: 'Dulce de Leche', color: '#C98B4B', silk: '#FFF4E0' },
+  { name: 'Mate Amargo', color: '#19C37D', silk: '#0B3D2B' },
+  { name: 'Tormenta', color: '#4C8DFF', silk: '#FFFFFF' },
+  { name: 'Chispita', color: '#FFC93C', silk: '#7C5CFF' },
+  { name: 'Pampa', color: '#C77DFF', silk: '#37E2D5' },
+];
+
+/** Pago total (incluye la apuesta) si tu caballo gana. */
+export const HORSE_PAYOUT = 6;
+export const HORSE_BETS = [10, 25, 50, 100, 250, 500];
+/** tiempo de pantalla de resultado antes de volver a apostar */
+export const HORSE_RESULT_MS = 4500;
+
 /* ── Ruleta europea (un solo cero) ────────────────────────────────────────── */
 
 /** Orden físico de los números en la rueda. */
@@ -247,6 +284,22 @@ export const PYR = {
   /** puntos por segundo en la cima */
   POINTS_PER_SEC: 12,
   TICK_HZ: 60,
+  /** aplastado: tiempo hasta reaparecer en el piso */
+  RESPAWN_MS: 5000,
+  /** rebote del que aplasta */
+  STOMP_BOUNCE: 460,
+  /** cañonazo */
+  SHOT_COOLDOWN: 7000,
+  SHOT_SPEED: 760,
+  SHOT_R: 13,
+  SHOT_TTL: 1700,
+  /** apunta solo al rival más cercano dentro de este cono (radianes, hacia arriba o abajo) */
+  SHOT_AIM_CONE: 0.9,
+  SHOT_AIM_RANGE: 760,
+  SHOT_FORCE: 1500,
+  SHOT_LIFT: 720,
+  /** sin control y sin tope de velocidad mientras vuela */
+  LAUNCH_MS: 900,
 } as const;
 
 /** Semiancho del escalón `level` (1..LEVELS). El nivel 0 es el piso. */

@@ -192,9 +192,12 @@ function paint(
 ): void {
   const cx = side / 2;
   const cy = side / 2;
-  const R = side * 0.325;
-  const Ro = side * 0.375;
-  const Rp = side * 0.452;
+  /** radio del círculo: los jugadores están parados sobre este borde */
+  const R = side * 0.335;
+  /** alto de un jugador parado */
+  const H = side * 0.088;
+  /** la pelota pasa a la altura del pecho */
+  const Ro = R + H * 0.52;
   const now = serverNow();
 
   ctx.clearRect(0, 0, side, side);
@@ -257,62 +260,9 @@ function paint(
     ctx.fill();
   }
 
-  /* jugadores */
+  /* jugadores, parados sobre el borde */
   for (const seat of v.seats) {
-    const p = players.get(seat.playerId);
-    const isMe = seat.playerId === meId;
-    const crouching = seat.state === 'crouch' && now < seat.until;
-    const swinging = seat.state === 'swing' && now < seat.until;
-
-    const push = crouching ? side * 0.035 : 0;
-    const scale = crouching ? 0.62 : 1;
-    const px = cx + Math.cos(seat.angle) * (Rp + push);
-    const py = cy + Math.sin(seat.angle) * (Rp + push);
-
-    /* raqueta */
-    if (seat.alive) {
-      const reach = swinging ? side * 0.082 : side * 0.03;
-      const rx = cx + Math.cos(seat.angle) * (Rp - reach);
-      const ry = cy + Math.sin(seat.angle) * (Rp - reach);
-      ctx.lineWidth = Math.max(2, side * 0.009);
-      ctx.strokeStyle = swinging ? '#ffe066' : 'rgba(255,255,255,0.45)';
-      ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.lineTo(rx, ry);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(rx, ry, side * (swinging ? 0.027 : 0.018), 0, TAU);
-      ctx.fillStyle = swinging ? 'rgba(255, 224, 102, 0.95)' : 'rgba(255,255,255,0.3)';
-      ctx.fill();
-    }
-
-    /* cápsula */
-    const r = side * 0.042 * scale;
-    ctx.beginPath();
-    ctx.arc(px, py, r, 0, TAU);
-    if (!seat.alive) ctx.fillStyle = 'rgba(70, 70, 90, 0.75)';
-    else if (crouching) ctx.fillStyle = 'rgba(60, 220, 190, 0.95)';
-    else ctx.fillStyle = `hsl(${p?.avatar.hue ?? 200} 70% 55%)`;
-    ctx.fill();
-    ctx.lineWidth = isMe ? Math.max(3, side * 0.009) : Math.max(1.5, side * 0.004);
-    ctx.strokeStyle = isMe ? '#ffe066' : 'rgba(0,0,0,0.35)';
-    ctx.stroke();
-
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.globalAlpha = seat.alive ? 1 : 0.4;
-    ctx.font = `${Math.round(r * 1.15)}px serif`;
-    ctx.fillText(seat.alive ? (p?.avatar.face ?? '🙂') : '💀', px, py + r * 0.06);
-
-    /* nombre, siempre fuera del círculo */
-    const nx = cx + Math.cos(seat.angle) * (Rp + side * 0.078);
-    const ny = cy + Math.sin(seat.angle) * (Rp + side * 0.078);
-    ctx.globalAlpha = seat.alive ? 0.95 : 0.4;
-    ctx.font = `800 ${Math.round(side * 0.027)}px Outfit, sans-serif`;
-    ctx.fillStyle = isMe ? '#ffe066' : '#ffffff';
-    ctx.fillText(short(p?.name ?? '—'), nx, ny);
-    ctx.restore();
+    drawSeat(ctx, seat, players.get(seat.playerId), seat.playerId === meId, { cx, cy, R, H, side, now });
   }
 
   /* efectos */
@@ -346,6 +296,167 @@ function paint(
   ctx.shadowBlur = side * 0.045;
   ctx.fill();
   ctx.shadowBlur = 0;
+}
+
+interface SeatGeo {
+  cx: number;
+  cy: number;
+  R: number;
+  H: number;
+  side: number;
+  now: number;
+}
+
+function drawSeat(
+  ctx: CanvasRenderingContext2D,
+  seat: SmashView['seats'][number],
+  p: PlayerPublic | undefined,
+  isMe: boolean,
+  g: SeatGeo,
+): void {
+  const { cx, cy, R, H, side, now } = g;
+  const crouching = seat.state === 'crouch' && now < seat.until;
+  const swinging = seat.state === 'swing' && now < seat.until;
+  const hue = p?.avatar.hue ?? 200;
+  const W = H * 0.58;
+
+  // Marco local: el origen es el centro del círculo y "arriba" (-y) apunta hacia afuera.
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(seat.angle + Math.PI / 2);
+
+  /* escotilla en el borde: ahí se esconde */
+  ctx.beginPath();
+  ctx.ellipse(0, -R + side * 0.004, W * 0.75, side * 0.011, 0, 0, TAU);
+  ctx.fillStyle = crouching ? 'rgba(0, 20, 22, 0.85)' : 'rgba(0, 30, 32, 0.45)';
+  ctx.fill();
+
+  if (!seat.alive) {
+    // Tirado de costado sobre el borde.
+    ctx.globalAlpha = 0.45;
+    ctx.font = `${Math.round(H * 0.5)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('💀', 0, -R - H * 0.25);
+    ctx.restore();
+    paintName(ctx, seat, p, isMe, g, H * 0.6);
+    return;
+  }
+
+  // Cuánto se hundió: entra rápido y sale con un rebotecito.
+  let sink = 0;
+  if (crouching) {
+    const left = seat.until - now;
+    const enter = Math.min(1, (SMASH.CROUCH_ACTIVE - left) / 70);
+    // Al final de la ventana vuelve a asomar.
+    const exit = Math.min(1, left / 90);
+    sink = Math.max(0, Math.min(1, enter, exit)) * 0.86;
+  }
+
+  ctx.save();
+  // Recortamos todo lo que quede adentro del círculo: así parece que se mete por la escotilla.
+  ctx.beginPath();
+  ctx.rect(-side, -side, side * 2, side * 2);
+  ctx.arc(0, 0, R, 0, TAU, true);
+  ctx.clip('evenodd');
+  ctx.translate(0, sink * H);
+
+  const feet = -R;
+  const top = feet - H;
+
+  /* piernas */
+  ctx.fillStyle = `hsl(${hue} 45% 30%)`;
+  ctx.fillRect(-W * 0.3, feet - H * 0.22, W * 0.2, H * 0.22);
+  ctx.fillRect(W * 0.1, feet - H * 0.22, W * 0.2, H * 0.22);
+
+  /* cuerpo tipo poroto */
+  const body = ctx.createLinearGradient(-W / 2, 0, W / 2, 0);
+  body.addColorStop(0, `hsl(${hue} 75% 62%)`);
+  body.addColorStop(1, `hsl(${hue} 70% 45%)`);
+  ctx.fillStyle = body;
+  roundRect(ctx, -W / 2, top, W, H * 0.82, W * 0.48);
+  ctx.fill();
+  ctx.lineWidth = isMe ? Math.max(2.5, side * 0.007) : Math.max(1.2, side * 0.003);
+  ctx.strokeStyle = isMe ? '#ffe066' : 'rgba(0,0,0,0.4)';
+  ctx.stroke();
+
+  /* cara */
+  ctx.font = `${Math.round(W * 0.78)}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(p?.avatar.face ?? '🙂', 0, top + W * 0.55);
+
+  /* brazo con paleta: en reposo cuelga, al pegar barre de abajo hacia afuera */
+  const shoulderX = W * 0.46;
+  const shoulderY = top + H * 0.42;
+  let armAng = 0.5; // apuntando abajo y al costado
+  if (swinging) {
+    const prog = 1 - (seat.until - now) / SMASH.SWING_ACTIVE;
+    armAng = 0.5 - Math.sin(Math.min(1, Math.max(0, prog)) * Math.PI) * 2.6;
+  }
+  ctx.save();
+  ctx.translate(shoulderX, shoulderY);
+  ctx.rotate(armAng);
+  ctx.strokeStyle = `hsl(${hue} 50% 35%)`;
+  ctx.lineWidth = Math.max(2, W * 0.14);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(W * 0.62, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(W * 0.9, 0, W * 0.32, W * 0.24, 0, 0, TAU);
+  ctx.fillStyle = swinging ? '#ffe066' : '#ff8a3d';
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, W * 0.05);
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.restore();
+
+  /* tapa de la escotilla, delante del que se escondió */
+  if (crouching) {
+    ctx.beginPath();
+    ctx.ellipse(0, -R + side * 0.004, W * 0.75, side * 0.011, 0, 0, TAU);
+    ctx.strokeStyle = 'rgba(120, 255, 220, 0.85)';
+    ctx.lineWidth = Math.max(1.5, side * 0.004);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+  paintName(ctx, seat, p, isMe, g, H * (1 - sink) + side * 0.035);
+}
+
+function paintName(
+  ctx: CanvasRenderingContext2D,
+  seat: SmashView['seats'][number],
+  p: PlayerPublic | undefined,
+  isMe: boolean,
+  g: SeatGeo,
+  above: number,
+): void {
+  const { cx, cy, R, side } = g;
+  const d = R + above + side * 0.012;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.globalAlpha = seat.alive ? 0.95 : 0.4;
+  ctx.font = `800 ${Math.round(side * 0.026)}px Outfit, sans-serif`;
+  ctx.fillStyle = isMe ? '#ffe066' : '#ffffff';
+  ctx.fillText(short(p?.name ?? '—'), cx + Math.cos(seat.angle) * d, cy + Math.sin(seat.angle) * d);
+  ctx.restore();
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
 }
 
 function short(name: string): string {

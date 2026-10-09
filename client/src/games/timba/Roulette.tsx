@@ -92,15 +92,28 @@ export function Roulette({ v, balance }: { v: RouletteView; balance: number }): 
               transitionDuration: `${ROULETTE_SPIN_MS}ms`,
             }}
           >
-            {ROULETTE_WHEEL.map((n, i) => (
-              <span
-                key={n}
-                className="rl__num"
-                style={{ transform: `rotate(${i * SEG + SEG / 2}deg) translateY(-44%)` }}
-              >
-                {n}
-              </span>
-            ))}
+            {/* Los números van en un SVG que gira con la rueda: se leen durante todo el giro. */}
+            <svg className="rl__nums" viewBox="0 0 200 200" aria-hidden>
+              {ROULETTE_WHEEL.map((n, i) => {
+                const a = i * SEG;
+                return (
+                  <g key={n} transform={`rotate(${a} 100 100)`}>
+                    <line x1="100" y1="3" x2="100" y2="60" stroke="rgba(255,215,130,0.45)" strokeWidth="0.6" />
+                    <text
+                      x="100"
+                      y="16"
+                      transform={`rotate(${SEG / 2} 100 100)`}
+                      textAnchor="middle"
+                      className="rl__numtxt"
+                    >
+                      {n}
+                    </text>
+                  </g>
+                );
+              })}
+              <circle cx="100" cy="100" r="76" fill="none" stroke="rgba(255,215,130,0.5)" strokeWidth="1" />
+              <circle cx="100" cy="100" r="60" fill="rgba(0,0,0,0.28)" />
+            </svg>
             <div className="rl__hub" />
           </div>
 

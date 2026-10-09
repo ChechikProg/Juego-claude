@@ -419,8 +419,8 @@
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: 14px;
-  padding: 30px 0;
+  gap: 11px;
+  padding: 16px 0;
 }
 
 .intro__step {
@@ -432,7 +432,7 @@
 }
 
 .intro__icon {
-  font-size: clamp(56px, 13vw, 90px);
+  font-size: clamp(48px, 10vw, 72px);
   line-height: 1;
   filter: drop-shadow(0 14px 34px rgba(0, 0, 0, 0.6));
 }
@@ -500,20 +500,59 @@
 
 .intro__go {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-top: 6px;
+  justify-content: center;
+  gap: 10px 18px;
+  margin-top: 4px;
 }
 
 .intro__count {
+  min-width: 2ch;
   font-family: var(--display);
-  font-size: clamp(44px, 10vw, 72px);
+  font-size: clamp(40px, 8vw, 60px);
   line-height: 1;
   background: var(--accent);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.intro__ready { min-width: 240px; }
+
+.intro__readyrow {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 560px;
+}
+
+.intro__face {
+  position: relative;
+  opacity: 0.4;
+  filter: grayscale(0.8);
+  transition: opacity 0.2s, filter 0.2s, transform 0.2s;
+}
+
+.intro__face--on { opacity: 1; filter: none; transform: translateY(-2px); }
+
+.intro__check {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #04130c;
+  font-size: 10px;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 2px var(--bg);
 }
 
 /* ══ Resultados del minijuego ═════════════════════════════════════════════ */

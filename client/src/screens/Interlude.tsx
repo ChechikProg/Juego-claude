@@ -14,21 +14,32 @@ export function GameIntro({
   index,
   total,
   endsAt,
+  readyIds,
 }: {
   gameId: GameId;
   index: number;
   total: number;
   endsAt: number;
+  readyIds: string[];
 }): JSX.Element {
   const g = GAMES[gameId];
   const left = useCountdown(endsAt, 10);
   const isHost = useIsHost();
+  const meId = useStore((s) => s.playerId);
+  const roster = useStore((s) => s.room?.players ?? []);
+  const online = roster.filter((p) => p.connected);
+  const iAmReady = !!meId && readyIds.includes(meId);
+  const readyCount = online.filter((p) => readyIds.includes(p.id)).length;
   const seconds = Math.ceil(left / 1000);
   const lastBeep = useRef(0);
 
   useEffect(() => {
     sfx.reveal();
   }, [gameId]);
+
+  useEffect(() => {
+    if (readyIds.length) sfx.tap();
+  }, [readyIds.length]);
 
   useEffect(() => {
     if (seconds <= 3 && seconds > 0 && lastBeep.current !== seconds) {
@@ -71,6 +82,33 @@ export function GameIntro({
 
       <div className="intro__go">
         <div className="intro__count">{seconds > 0 ? seconds : '¡Ya!'}</div>
+
+        <button
+          className={`btn btn--lg ${iAmReady ? 'btn--ghost' : 'btn--green'} intro__ready`}
+          onClick={() => {
+            sfx.pick();
+            api.ready(!iAmReady);
+          }}
+        >
+          {iAmReady ? 'Esperando al resto…' : '✓ Listo, ya leí'}
+        </button>
+
+        <div className="intro__readyrow" aria-label="Jugadores listos">
+          {online.map((p) => (
+            <span
+              key={p.id}
+              className={`intro__face ${readyIds.includes(p.id) ? 'intro__face--on' : ''}`}
+              title={p.name}
+            >
+              <Avatar avatar={p.avatar} size={30} />
+              {readyIds.includes(p.id) && <span className="intro__check">✓</span>}
+            </span>
+          ))}
+          <span className="chip tnum">
+            {readyCount}/{online.length} listos
+          </span>
+        </div>
+
         {isHost && (
           <button className="btn btn--ghost btn--sm" onClick={() => api.skip()}>
             Saltear la intro
