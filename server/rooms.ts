@@ -173,6 +173,9 @@ export class Room {
     if (patch.piramideSeconds !== undefined) this.config.piramideSeconds = int(patch.piramideSeconds, 30, 600, this.config.piramideSeconds);
     if (patch.frasesRounds !== undefined) this.config.frasesRounds = int(patch.frasesRounds, 1, 8, this.config.frasesRounds);
     if (patch.tanqueSeconds !== undefined) this.config.tanqueSeconds = int(patch.tanqueSeconds, 60, 600, this.config.tanqueSeconds);
+    if (patch.copaRounds !== undefined) this.config.copaRounds = int(patch.copaRounds, 1, 5, this.config.copaRounds);
+    if (patch.formulaRaces !== undefined) this.config.formulaRaces = int(patch.formulaRaces, 1, 3, this.config.formulaRaces);
+    if (patch.shooterLives !== undefined) this.config.shooterLives = int(patch.shooterLives, 1, 6, this.config.shooterLives);
     this.broadcastRoom();
   }
 

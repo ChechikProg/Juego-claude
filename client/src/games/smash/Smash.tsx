@@ -82,7 +82,8 @@ export function Smash({ view }: { view: SmashView }): JSX.Element {
     const v = snap.current;
 
     // Extrapolamos desde el último snapshot y suavizamos el error de red.
-    const ahead = (serverNow() - v.t) / 1000;
+    // Durante el saque la pelota está quieta: sólo se mueve después de serveUntil.
+    const ahead = (serverNow() - Math.max(v.t, v.serveUntil)) / 1000;
     const target = v.ball.angle + v.ball.omega * Math.max(0, Math.min(0.4, ahead));
     let diff = ((target - angle.current + Math.PI) % TAU + TAU) % TAU - Math.PI;
     if (Math.abs(diff) > 1.2) angle.current = target;
@@ -296,6 +297,41 @@ function paint(
   ctx.shadowBlur = side * 0.045;
   ctx.fill();
   ctx.shadowBlur = 0;
+
+  /* saque: flechas que marcan para dónde va a salir la pelota */
+  if ((v.stage === 'countdown' || v.stage === 'live') && now < v.serveUntil) {
+    const dir = Math.sign(v.ball.omega) || 1;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 110);
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < 3; i++) {
+      const a = ballAngle + dir * (0.13 + i * 0.075);
+      const ax = cx + Math.cos(a) * Ro;
+      const ay = cy + Math.sin(a) * Ro;
+      // Tangente en el sentido de giro.
+      const tx = -Math.sin(a) * dir;
+      const ty = Math.cos(a) * dir;
+      const nx = Math.cos(a);
+      const ny = Math.sin(a);
+      const s = side * 0.017;
+      ctx.beginPath();
+      ctx.moveTo(ax - tx * s + nx * s, ay - ty * s + ny * s);
+      ctx.lineTo(ax, ay);
+      ctx.lineTo(ax - tx * s - nx * s, ay - ty * s - ny * s);
+      ctx.strokeStyle = `rgba(220, 255, 150, ${(0.35 + pulse * 0.6) * (1 - i * 0.25)})`;
+      ctx.lineWidth = Math.max(2, side * 0.007);
+      ctx.stroke();
+    }
+    // Anillo que se cierra hasta el momento del saque.
+    const left = Math.max(0, Math.min(1, (v.serveUntil - now) / 1200));
+    ctx.beginPath();
+    ctx.arc(bx, by, br * (1.6 + left * 2.2), 0, TAU);
+    ctx.strokeStyle = `rgba(220, 255, 150, ${0.25 + (1 - left) * 0.6})`;
+    ctx.lineWidth = Math.max(1.5, side * 0.004);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 interface SeatGeo {

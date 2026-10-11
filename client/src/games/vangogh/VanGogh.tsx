@@ -1,14 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Stroke, VanGoghView } from '@shared/types';
 import { api } from '@/net/socket';
 import { useCountdown } from '@/lib/hooks';
 import { sfx } from '@/lib/sfx';
 import { usePlayerMap, useStore } from '@/state/store';
-import { Avatar, RankBadge, Timer, TimerBar } from '@/components/ui';
+import { Avatar, Modal, RankBadge, Timer, TimerBar } from '@/components/ui';
 import { DrawingPad, DrawingView } from './Canvas';
 
 const DRAW_TOTAL = 120_000;
-const VOTE_TOTAL = 13_000;
 
 export function VanGogh({ view }: { view: VanGoghView }): JSX.Element {
   switch (view.stage) {
@@ -16,8 +15,8 @@ export function VanGogh({ view }: { view: VanGoghView }): JSX.Element {
       return <Prompt v={view} />;
     case 'draw':
       return <Draw v={view} />;
-    case 'vote':
-      return <Vote v={view} />;
+    case 'rank':
+      return <Rank v={view} key={view.round} />;
     case 'roundResults':
       return <RoundResults v={view} />;
     default:
@@ -109,90 +108,225 @@ function Draw({ v }: { v: Extract<VanGoghView, { stage: 'draw' }> }): JSX.Elemen
   );
 }
 
-/* ── Votación estilo build battle ─────────────────────────────────────────── */
+/* ── Ranking: ordenar los dibujos de los demás ────────────────────────────── */
 
-function Vote({ v }: { v: Extract<VanGoghView, { stage: 'vote' }> }): JSX.Element {
+type RankV = Extract<VanGoghView, { stage: 'rank' }>;
+
+function Rank({ v }: { v: RankV }): JSX.Element {
   const left = useCountdown(v.endsAt, 5);
   const players = usePlayerMap();
-  const author = players.get(v.target.playerId);
-  const locked = !!v.reveal || v.isMine;
+  /** orden local, de mejor a peor (ids anónimos) */
+  const [order, setOrder] = useState<string[]>(() => v.myOrder ?? []);
+  const [zoom, setZoom] = useState<string | null>(null);
+  const submitted = v.myOrder !== null;
+  const total = v.cards.length;
+  const complete = total > 0 && order.length === total;
+  const confirmed = useRef(v.myOrder);
+  confirmed.current = v.myOrder;
+  const lastBeep = useRef(0);
 
   useEffect(() => {
-    sfx.card();
-  }, [v.index]);
+    sfx.reveal();
+  }, []);
 
   useEffect(() => {
-    if (v.reveal) sfx.reveal();
-  }, [v.reveal]);
+    const s = Math.ceil(left / 1000);
+    if (s <= 5 && s > 0 && lastBeep.current !== s) {
+      lastBeep.current = s;
+      sfx.urgent();
+    }
+  }, [left]);
+
+  // Apenas el orden está completo lo mandamos; si lo tocás de nuevo, lo retiramos.
+  useEffect(() => {
+    if (complete) {
+      if (!sameOrder(order, confirmed.current)) api.send('rank', { order });
+    } else if (confirmed.current !== null) {
+      api.send('rank', { order: null });
+    }
+  }, [order, complete]);
+
+  const toggle = (id: string) => {
+    if (order.includes(id)) {
+      sfx.back();
+      setOrder(order.filter((x) => x !== id));
+      return;
+    }
+    const next = [...order, id];
+    if (next.length === total) sfx.good();
+    else sfx.star(Math.min(5, next.length));
+    setOrder(next);
+  };
+
+  const byId = new Map(v.cards.map((c) => [c.id, c]));
+  const zoomed = zoom ? byId.get(zoom) : null;
+  const zoomPos = zoom ? order.indexOf(zoom) : -1;
 
   return (
-    <div className="vg-vote">
-      <header className="vg-vote__top">
-        <span className="chip">
-          Dibujo {v.index + 1} de {v.count}
-        </span>
+    <div className="vg-rank">
+      <header className="vg-rank__top">
+        <span className="chip">Ronda {v.round} de {v.totalRounds}</span>
         <div className="vg-word vg-word--sm">
           <span className="label">La palabra era</span>
           <strong>{v.word}</strong>
         </div>
-        {!v.reveal && <Timer ms={left} urgentAt={VOTE_TOTAL} />}
+        <div className="vg-rank__timer">
+          <Timer ms={left} urgentAt={10_000} />
+          <TimerBar ms={left} total={v.totalMs} />
+        </div>
       </header>
 
-      <div className="vg-vote__stage">
-        <DrawingView strokes={v.target.strokes} animate duration={1300} key={v.target.playerId + v.index} />
+      <p className="vg-rank__help">
+        <b>Ordená los dibujos del mejor al peor.</b> Tocalos en orden: el primero que toques queda 1º. Tocá uno ya
+        elegido para sacarlo.
+      </p>
 
-        {v.reveal && (
-          <div className="vg-reveal anim-pop">
-            <div className="vg-reveal__stars">
-              {'★'.repeat(Math.round(v.reveal.avg))}
-              <span className="vg-reveal__dim">{'★'.repeat(5 - Math.round(v.reveal.avg))}</span>
-            </div>
-            <div className="vg-reveal__avg tnum">{v.reveal.avg.toFixed(2)}</div>
-            <div className="hint">{v.reveal.votes} voto{v.reveal.votes === 1 ? '' : 's'}</div>
+      <div className="vg-rank__body">
+        {total === 0 ? (
+          <div className="vg-rank__grid vg-rank__grid--empty">
+            <p className="hint">Esta ronda no tenés dibujos para rankear. Esperá a los demás.</p>
+          </div>
+        ) : (
+          <div className="vg-rank__grid" role="list">
+            {v.cards.map((card, i) => {
+              const pos = order.indexOf(card.id);
+              return (
+                <div
+                  key={card.id}
+                  role="listitem"
+                  className={`vg-card ${pos >= 0 ? 'vg-card--on' : ''} ${pos === 0 ? 'vg-card--first' : ''} anim-rise`}
+                  style={{ animationDelay: `${i * 60}ms` }}
+                >
+                  <button
+                    className="vg-card__hit"
+                    onClick={() => toggle(card.id)}
+                    aria-label={
+                      pos >= 0
+                        ? `Dibujo en el puesto ${pos + 1}. Tocá para sacarlo.`
+                        : `Elegir este dibujo como ${order.length + 1}º`
+                    }
+                  >
+                    <DrawingView strokes={card.strokes} animate duration={1400} delay={i * 140} />
+                  </button>
+                  {pos >= 0 ? (
+                    <span className={`vg-card__badge vg-card__badge--${Math.min(pos + 1, 4)}`}>{pos + 1}º</span>
+                  ) : (
+                    <span className="vg-card__next" aria-hidden>
+                      {order.length + 1}º
+                    </span>
+                  )}
+                  <button className="vg-card__zoom" onClick={() => setZoom(card.id)} aria-label="Ver en grande">
+                    🔍
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
+
+        <aside className="vg-rank__side">
+          {total > 0 && (
+            <section className="vg-ladder card">
+              <h3 className="card__title">Tu ranking</h3>
+              <ol className="vg-ladder__list">
+                {Array.from({ length: total }, (_, i) => {
+                  const id = order[i];
+                  const card = id ? byId.get(id) : null;
+                  return (
+                    <li key={i} className={`vg-ladder__slot ${card ? 'vg-ladder__slot--on' : ''}`}>
+                      <span className={`vg-ladder__pos vg-ladder__pos--${Math.min(i + 1, 4)}`}>{i + 1}º</span>
+                      {card ? (
+                        <button
+                          className="vg-ladder__thumb"
+                          onClick={() => toggle(card.id)}
+                          aria-label={`Sacar el ${i + 1}º`}
+                        >
+                          <DrawingView strokes={card.strokes} />
+                        </button>
+                      ) : (
+                        <span className="vg-ladder__empty">{i === order.length ? 'tocá un dibujo' : '—'}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+              <div className="vg-ladder__foot">
+                {submitted ? (
+                  <span className="chip chip--good">✓ Enviado</span>
+                ) : complete ? (
+                  <span className="chip">Enviando…</span>
+                ) : (
+                  <span className="hint">Faltan {total - order.length}</span>
+                )}
+                <button
+                  className="btn btn--sm btn--ghost"
+                  disabled={order.length === 0}
+                  onClick={() => {
+                    sfx.back();
+                    setOrder([]);
+                  }}
+                >
+                  ↺ De nuevo
+                </button>
+              </div>
+            </section>
+          )}
+
+          <section className="vg-rank__status card">
+            <div className="vg-ready__faces">
+              {v.submittedIds.map((id) => {
+                const p = players.get(id);
+                return p ? <Avatar key={id} avatar={p.avatar} size={26} /> : null;
+              })}
+            </div>
+            <span className="chip nowrap">
+              {v.submittedIds.length}/{v.rankersTotal} terminaron
+            </span>
+          </section>
+
+          {v.mine && (
+            <section className="vg-mine card">
+              <h3 className="card__title">Tu obra</h3>
+              <div className="vg-mine__frame">
+                <DrawingView strokes={v.mine} />
+              </div>
+              <p className="hint">A vos mismo no te podés rankear.</p>
+            </section>
+          )}
+        </aside>
       </div>
 
-      <footer className="vg-vote__foot">
-        <div className="vg-vote__author">
-          {v.reveal && author ? (
-            <>
-              <Avatar avatar={author.avatar} size={34} />
-              <span className="prow__name">{author.name}</span>
-            </>
-          ) : (
-            <span className="hint">¿De quién será? Se revela al cerrar.</span>
-          )}
-        </div>
-
-        {v.isMine ? (
-          <span className="chip chip--accent">Este es tuyo — no podés votarte</span>
-        ) : (
-          <div className="stars" role="group" aria-label="Puntuá el dibujo">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button
-                key={n}
-                className={`star ${v.myVote && n <= v.myVote ? 'star--on' : ''}`}
-                disabled={locked}
-                onClick={() => {
-                  sfx.star(n);
-                  api.send('vote', { value: n });
-                }}
-                aria-label={`${n} estrella${n > 1 ? 's' : ''}`}
-                aria-pressed={v.myVote === n}
-              >
-                ★
+      <Modal open={!!zoomed} onClose={() => setZoom(null)}>
+        {zoomed && (
+          <div className="vg-zoom">
+            <div className="vg-zoom__frame">
+              <DrawingView strokes={zoomed.strokes} />
+            </div>
+            <div className="vg-zoom__foot">
+              <span className="chip">{zoomPos >= 0 ? `Lo tenés ${zoomPos + 1}º` : 'Sin puesto todavía'}</span>
+              <span className="grow" />
+              <button className="btn btn--ghost" onClick={() => setZoom(null)}>
+                Cerrar
               </button>
-            ))}
+              <button
+                className={`btn ${zoomPos >= 0 ? 'btn--ghost' : 'btn--green'}`}
+                onClick={() => {
+                  toggle(zoomed.id);
+                  setZoom(null);
+                }}
+              >
+                {zoomPos >= 0 ? 'Sacarlo del ranking' : `Ponerlo ${order.length + 1}º`}
+              </button>
+            </div>
           </div>
         )}
-
-        <span className="chip nowrap">
-          {v.votesIn}/{v.votersTotal} votaron
-        </span>
-      </footer>
+      </Modal>
     </div>
   );
+}
+
+function sameOrder(a: string[], b: string[] | null): boolean {
+  return !!b && a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
 /* ── Galería de la ronda ──────────────────────────────────────────────────── */
@@ -218,6 +352,12 @@ function RoundResults({ v }: { v: Extract<VanGoghView, { stage: 'roundResults' }
         </span>
       </header>
 
+      {v.noContest && (
+        <p className="vg-gallery__note">
+          Con menos de 3 artistas no hay con qué comparar: todo dibujo entregado se lleva el puntaje completo.
+        </p>
+      )}
+
       <div className="vg-gallery__grid">
         {v.entries.map((e, i) => {
           const p = players.get(e.playerId);
@@ -229,14 +369,24 @@ function RoundResults({ v }: { v: Extract<VanGoghView, { stage: 'roundResults' }
             >
               <div className="vg-art__frame">
                 <DrawingView strokes={e.strokes} />
-                {i < 3 && <div className={`vg-art__medal vg-art__medal--${i + 1}`}>{i + 1}º</div>}
+                {i < 3 && !v.noContest && <div className={`vg-art__medal vg-art__medal--${i + 1}`}>{i + 1}º</div>}
               </div>
               <div className="vg-art__foot">
                 {p && <Avatar avatar={p.avatar} size={28} offline={!p.connected} />}
                 <span className="grow prow__name">{p?.name ?? '—'}</span>
-                <span className="vg-art__stars tnum">★ {e.avg.toFixed(2)}</span>
+                {!v.noContest && (
+                  <span className="vg-art__stats tnum" title="Puesto promedio y veces que salió primero">
+                    {e.avgPlace !== null ? `#${e.avgPlace.toFixed(1)}` : 'sin votos'}
+                    {e.firsts > 0 && ` · 🥇${e.firsts}`}
+                  </span>
+                )}
                 <span className="vg-art__gain tnum">+{e.gained}</span>
               </div>
+              {!v.noContest && (
+                <div className="vg-art__meter" aria-hidden>
+                  <span style={{ width: `${e.score}%` }} />
+                </div>
+              )}
             </article>
           );
         })}

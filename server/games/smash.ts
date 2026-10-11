@@ -35,6 +35,8 @@ interface SmashState {
   round: number;
   totalRounds: number;
   until: number;
+  /** hasta acá la pelota queda quieta en el saque */
+  serveUntil: number;
   angle: number;
   omega: number;
   rally: number;
@@ -62,6 +64,7 @@ export const smash: GameModule<SmashState> = {
       round: 0,
       totalRounds: Math.max(1, Math.min(9, ctx.config.smashRounds || 3)),
       until: 0,
+      serveUntil: 0,
       angle: 0,
       omega: SMASH.START_OMEGA,
       rally: 0,
@@ -101,12 +104,18 @@ export const smash: GameModule<SmashState> = {
     seat.until = t + active;
     seat.cooldownUntil = seat.guardUntil + recover;
 
-    // Rescate por latencia: si la pelota lo tocó dentro de la ventana efectiva,
-    // le perdonamos la eliminación (sin devolver la pelota).
+    // Rescate por latencia: la pelota lo tocó dentro de la ventana efectiva.
     if (seat.doomedAt !== null && seat.doomedAt >= from && seat.doomedAt <= seat.guardUntil) {
+      const at = seat.doomedAt;
       seat.doomedAt = null;
-      seat.dodges += 1;
-      addFx(s, 'dodge', seat, t);
+      if (type === 'hit') {
+        // Un raquetazo a tiempo devuelve la pelota: antes sólo se perdonaba la
+        // eliminación y la pelota "atravesaba" la paleta.
+        returnBall(s, seat, at, t);
+      } else {
+        seat.dodges += 1;
+        addFx(s, 'dodge', seat, t);
+      }
     }
     ctx.push();
   },
@@ -138,10 +147,21 @@ export const smash: GameModule<SmashState> = {
       }
     }
 
-    // La velocidad sube sola: ninguna ronda es eterna.
+    // Saque: la pelota queda quieta un ratito marcando para dónde va.
+    if (t < s.serveUntil) {
+      ctx.push();
+      return;
+    }
+
+    // La velocidad sube sola: ninguna ronda es eterna. Después del saque arranca
+    // despacio y llega a la velocidad normal en SERVE_RAMP_MS.
     const dir = Math.sign(s.omega) || 1;
-    const speed = Math.min(SMASH.MAX_OMEGA, Math.abs(s.omega) * (1 + SMASH.RAMP * dt));
-    s.omega = speed * dir;
+    let speed = Math.abs(s.omega) * (1 + SMASH.RAMP * dt);
+    if (s.rally === 0 && speed < SMASH.START_OMEGA) {
+      const rampPerSec = (SMASH.START_OMEGA * (1 - SMASH.SERVE_START)) / (SMASH.SERVE_RAMP_MS / 1000);
+      speed = Math.min(SMASH.START_OMEGA, speed + rampPerSec * dt);
+    }
+    s.omega = Math.min(SMASH.MAX_OMEGA, speed) * dir;
 
     const delta = s.omega * dt;
     const a0 = s.angle;
@@ -166,17 +186,7 @@ export const smash: GameModule<SmashState> = {
       const guarded = seat.guardKind !== null && at >= seat.guardFrom && at <= seat.guardUntil;
 
       if (guarded && seat.guardKind === 'swing') {
-        seat.hits += 1;
-        s.rally += 1;
-        s.omega = -s.omega * SMASH.HIT_BOOST;
-        if (Math.abs(s.omega) > SMASH.MAX_OMEGA) s.omega = Math.sign(s.omega) * SMASH.MAX_OMEGA;
-        // Despegamos la pelota del asiento para que no vuelva a chocar en el mismo tick.
-        s.angle = norm(seat.angle + Math.sign(s.omega) * 0.02);
-        // El smash consume el raquetazo.
-        seat.guardUntil = at;
-        seat.state = 'recover';
-        seat.until = seat.cooldownUntil;
-        addFx(s, 'hit', seat, t);
+        returnBall(s, seat, at, t);
       } else if (guarded) {
         seat.dodges += 1;
         addFx(s, 'dodge', seat, t);
@@ -224,6 +234,7 @@ export const smash: GameModule<SmashState> = {
       totalRounds: s.totalRounds,
       t: ctx.now(),
       until: s.until,
+      serveUntil: s.serveUntil,
       ball: { angle: s.angle, omega: s.omega },
       rally: s.rally,
       seats: s.seats.map(
@@ -250,6 +261,31 @@ export const smash: GameModule<SmashState> = {
 };
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Smash: invierte y acelera la pelota como si hubiera rebotado en la paleta en
+ * el instante `at`. Si el golpe llega tarde (rescate por latencia), la pelota
+ * ya siguió de largo: la reubicamos donde estaría si hubiera rebotado a tiempo.
+ */
+function returnBall(s: SmashState, seat: Seat, at: number, t: number): void {
+  const oldDir = Math.sign(s.omega) || 1;
+  const speed = Math.min(SMASH.MAX_OMEGA, Math.abs(s.omega) * SMASH.HIT_BOOST);
+  s.omega = -oldDir * speed;
+  const travelled = Math.max(0.02, (speed * Math.max(0, t - at)) / 1000);
+  s.angle = norm(seat.angle - oldDir * travelled);
+
+  // A mucha velocidad la pelota "fantasma" pudo haber marcado al vecino: como en
+  // realidad rebotó, esos toques no cuentan.
+  for (const other of s.seats) {
+    if (other !== seat && other.doomedAt !== null && other.doomedAt >= at) other.doomedAt = null;
+  }
+
+  seat.hits += 1;
+  s.rally += 1;
+  // El smash consume el raquetazo.
+  seat.guardUntil = at;
+  addFx(s, 'hit', seat, t);
+}
 
 function addFx(s: SmashState, kind: SmashFx['kind'], seat: Seat, t: number): void {
   s.fx.push({ id: s.fxSeq++, kind, angle: seat.angle, at: t, playerId: seat.playerId });
@@ -298,8 +334,10 @@ function startRound(ctx: GameContext, s: SmashState): void {
   // Arranca justo en el medio entre dos jugadores, en una dirección al azar.
   const gap = n > 0 ? TAU / n / 2 : Math.PI;
   s.angle = norm(s.seats[0]?.angle ?? 0) + gap;
-  s.omega = (rnd() < 0.5 ? -1 : 1) * SMASH.START_OMEGA;
+  // Arranca lento y con una pausa de saque: nadie recibe la pelota encima.
+  s.omega = (rnd() < 0.5 ? -1 : 1) * SMASH.START_OMEGA * SMASH.SERVE_START;
   s.until = ctx.now() + SMASH.COUNTDOWN_MS;
+  s.serveUntil = s.until + SMASH.SERVE_MS;
   s.lastTick = ctx.now();
   ctx.push();
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BOMB, SCATTER, SLOT_COLS, SLOT_ROWS, money } from '@shared/constants';
 import type { SlotsView } from '@shared/types';
-import { api } from '@/net/socket';
+import { api, serverNow } from '@/net/socket';
 import { sfx } from '@/lib/sfx';
 
 /** Tienen que coincidir con server/games/timba/slots.ts */
@@ -13,19 +13,37 @@ const BETS = [5, 10, 20, 50, 100, 200, 500];
 export function Slots({ v, balance }: { v: SlotsView; balance: number }): JSX.Element {
   const spin = v.spin;
   /** -1 = reels girando, >=0 = índice del paso que se está mostrando */
-  const [idx, setIdx] = useState(0);
+  const [idx, setIdx] = useState(() => (v.spin ? v.spin.steps.length : 0));
   const [running, setRunning] = useState(false);
   const shownId = useRef<string | null>(null);
+  const spinRef = useRef(spin);
+  spinRef.current = spin;
+  const busyRef = useRef(v.busyUntil);
+  busyRef.current = v.busyUntil;
 
+  // Depende sólo del id: cada push del servidor trae un objeto `spin` nuevo y,
+  // si el efecto se re-ejecutara, cancelaría los timers y la máquina quedaría
+  // trabada en "girando" para siempre.
   useEffect(() => {
+    const spin = spinRef.current;
     if (!spin || spin.id === shownId.current) return;
     shownId.current = spin.id;
+
+    // Si el giro ya terminó (por ejemplo, volviste a la mesa), lo mostramos quieto.
+    const remaining = busyRef.current - serverNow();
+    if (remaining <= 0) {
+      setIdx(spin.steps.length);
+      setRunning(false);
+      return;
+    }
 
     setIdx(-1);
     setRunning(true);
     sfx.reel();
 
     const timers: ReturnType<typeof setTimeout>[] = [];
+    // El servidor no acepta otro giro hasta `busyUntil`: liberamos el botón ahí.
+    timers.push(setTimeout(() => setRunning(false), Math.max(remaining, INTRO_MS + spin.steps.length * STEP_MS) + 60));
     timers.push(
       setTimeout(() => {
         setIdx(0);
@@ -42,13 +60,17 @@ export function Slots({ v, balance }: { v: SlotsView; balance: number }): JSX.El
     }
     timers.push(
       setTimeout(() => {
-        setRunning(false);
+        setIdx(spin.steps.length);
         if (spin.freeSpinsAwarded > 0) sfx.jackpot();
         else if (spin.totalWin > 0) sfx.coin();
       }, INTRO_MS + spin.steps.length * STEP_MS),
     );
-    return () => timers.forEach(clearTimeout);
-  }, [spin]);
+    return () => {
+      timers.forEach(clearTimeout);
+      // Si se desmonta a mitad de camino, que no quede trabado al volver.
+      setRunning(false);
+    };
+  }, [spin?.id]);
 
   const step = spin && idx >= 0 ? spin.steps[Math.min(idx, spin.steps.length - 1)] : null;
   const prev = spin && idx > 0 ? spin.steps[idx - 1] : null;
@@ -70,7 +92,7 @@ export function Slots({ v, balance }: { v: SlotsView; balance: number }): JSX.El
 
   const busy = running || v.freeSpinsLeft > 0;
   const canSpin = !busy && balance >= v.bet;
-  const finished = !running && spin;
+  const finished = spin && (idx >= spin.steps.length || !running) ? spin : null;
 
   return (
     <div className={`sl ${v.inBonus ? 'sl--bonus' : ''}`}>
@@ -114,19 +136,19 @@ export function Slots({ v, balance }: { v: SlotsView; balance: number }): JSX.El
             }),
           )}
 
-          {finished && spin.totalWin > 0 && (
+          {finished && finished.totalWin > 0 && (
             <div className="sl__bigwin anim-pop">
               <span className="sl__bigwin-label">
-                {spin.multiplier > 1 ? `x${spin.multiplier} · ` : ''}
-                {spin.totalWin >= spin.bet * 20 ? '¡REVENTASTE LA MÁQUINA!' : 'Ganaste'}
+                {finished.multiplier > 1 ? `x${finished.multiplier} · ` : ''}
+                {finished.totalWin >= finished.bet * 20 ? '¡REVENTASTE LA MÁQUINA!' : 'Ganaste'}
               </span>
-              <span className="sl__bigwin-amt tnum">{money(spin.totalWin)}</span>
+              <span className="sl__bigwin-amt tnum">{money(finished.totalWin)}</span>
             </div>
           )}
 
-          {finished && spin.freeSpinsAwarded > 0 && (
+          {finished && finished.freeSpinsAwarded > 0 && (
             <div className="sl__bonuswin anim-pop">
-              🍭 {spin.freeSpinsAwarded} giros gratis
+              🍭 {finished.freeSpinsAwarded} giros gratis
             </div>
           )}
         </div>
@@ -149,7 +171,7 @@ export function Slots({ v, balance }: { v: SlotsView; balance: number }): JSX.El
           {idx >= 0 && runningWin > 0 ? (
             <>
               <span className="label">Premio</span>
-              <b>{money(runningWin * (finished ? spin!.multiplier : 1))}</b>
+              <b>{money(runningWin * (finished ? finished.multiplier : 1))}</b>
             </>
           ) : (
             <>

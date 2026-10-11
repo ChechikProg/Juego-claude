@@ -236,6 +236,42 @@ function Settings({ id, isHost }: { id: GameId; isHost: boolean }): JSX.Element 
       />
     );
   }
+  if (id === 'copa') {
+    return (
+      <Stepper
+        label="rondas"
+        value={config.copaRounds}
+        min={1}
+        max={5}
+        disabled={!isHost}
+        onChange={(v) => step({ copaRounds: v })}
+      />
+    );
+  }
+  if (id === 'formula') {
+    return (
+      <Stepper
+        label={config.formulaRaces === 1 ? 'carrera' : 'carreras'}
+        value={config.formulaRaces}
+        min={1}
+        max={3}
+        disabled={!isHost}
+        onChange={(v) => step({ formulaRaces: v })}
+      />
+    );
+  }
+  if (id === 'shooter') {
+    return (
+      <Stepper
+        label={config.shooterLives === 1 ? 'vida' : 'vidas'}
+        value={config.shooterLives}
+        min={1}
+        max={6}
+        disabled={!isHost}
+        onChange={(v) => step({ shooterLives: v })}
+      />
+    );
+  }
   return null;
 }
 

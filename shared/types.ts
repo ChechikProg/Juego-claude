@@ -3,7 +3,16 @@
  *  Todo lo que viaja por el socket está tipado acá.
  * ────────────────────────────────────────────────────────────────────────── */
 
-export type GameId = 'vangogh' | 'timba' | 'smash' | 'piramide' | 'frases' | 'tanque';
+export type GameId =
+  | 'vangogh'
+  | 'timba'
+  | 'smash'
+  | 'piramide'
+  | 'frases'
+  | 'tanque'
+  | 'copa'
+  | 'formula'
+  | 'shooter';
 
 export interface Avatar {
   /** 0-359, define el gradiente del avatar */
@@ -61,6 +70,9 @@ export interface RoomConfig {
   piramideSeconds: number;
   frasesRounds: number;
   tanqueSeconds: number;
+  copaRounds: number;
+  formulaRaces: number;
+  shooterLives: number;
 }
 
 export interface RoomState {
@@ -92,21 +104,30 @@ export interface Stroke {
   w: number;
   /** 1 = goma */
   e?: 1;
+  /** 1 = balde: rellena desde el punto p[0],p[1] */
+  f?: 1;
   /** [x0,y0,x1,y1,...] */
   p: number[];
 }
 
-export interface Drawing {
-  playerId: string;
+/** Dibujo anónimo para rankear: el autor se revela recién en la galería. */
+export interface RankCard {
+  /** id anónimo, válido sólo esta ronda */
+  id: string;
   strokes: Stroke[];
 }
 
 export interface VanGoghEntry {
   playerId: string;
   strokes: Stroke[];
-  /** promedio de estrellas 1..5 */
-  avg: number;
-  votes: number;
+  /** 0..100: 100 = todos lo pusieron primero */
+  score: number;
+  /** cuántos lo pusieron primero */
+  firsts: number;
+  /** cuántos lo rankearon */
+  rankers: number;
+  /** puesto promedio (1 = mejor), null si nadie lo rankeó */
+  avgPlace: number | null;
   /** puntos internos sumados esta ronda */
   gained: number;
 }
@@ -124,20 +145,21 @@ export type VanGoghView =
       artists: number;
     }
   | {
-      stage: 'vote';
+      stage: 'rank';
       round: number;
       totalRounds: number;
       word: string;
       endsAt: number;
-      index: number;
-      count: number;
-      target: Drawing;
-      isMine: boolean;
-      myVote: number | null;
-      votesIn: number;
-      votersTotal: number;
-      /** se revela al cerrar la votación de ese dibujo */
-      reveal: { avg: number; votes: number } | null;
+      /** duración total de la etapa, para la barra de tiempo */
+      totalMs: number;
+      /** los dibujos de los demás, en un orden al azar propio de cada jugador */
+      cards: RankCard[];
+      /** tu propio dibujo, para que lo veas (no se rankea) */
+      mine: Stroke[] | null;
+      /** el ranking que mandaste (ids de mejor a peor), si ya lo mandaste */
+      myOrder: string[] | null;
+      submittedIds: string[];
+      rankersTotal: number;
     }
   | {
       stage: 'roundResults';
@@ -147,6 +169,8 @@ export type VanGoghView =
       endsAt: number;
       entries: VanGoghEntry[];
       totals: Record<string, number>;
+      /** true si no hubo con quién comparar (1 o 2 artistas) */
+      noContest: boolean;
     };
 
 /* ─────────────────────────────── 2. VIVA LA TIMBA ────────────────────────── */
@@ -246,6 +270,8 @@ export interface SlotsView {
   inBonus: boolean;
   lastWin: number;
   bonusWin: number;
+  /** timestamp de servidor en que termina la animación del último giro */
+  busyUntil: number;
 }
 
 /** Recorrido de un caballo: posiciones 0..1 en cada instante (ms desde la largada). */
@@ -329,6 +355,8 @@ export interface SmashView {
   t: number;
   /** cuándo arranca / termina la fase actual */
   until: number;
+  /** hasta acá la pelota está quieta esperando el saque */
+  serveUntil: number;
   ball: { angle: number; omega: number };
   /** golpes acumulados en la ronda */
   rally: number;
@@ -544,4 +572,246 @@ export interface TanqueView {
   bullets: TankBullet[];
   fx: TankFx[];
   feed: TankKill[];
+}
+
+/* ───────────────────────────── 7. NOCHE DE COPA ──────────────────────────── */
+
+export interface CopaGoal {
+  playerId: string;
+  /** ángulo del centro del arco sobre el borde de la cancha */
+  a: number;
+  /** semiancho angular del arco */
+  half: number;
+}
+
+export interface CopaPuck {
+  owner: string;
+  /** 0..2 */
+  i: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+export interface CopaPlayer {
+  playerId: string;
+  alive: boolean;
+  /** timestamp desde el que puede volver a lanzar */
+  readyAt: number;
+  /** goles hechos en el minijuego */
+  goals: number;
+  /** puesto en la ronda actual (1 = ganó), null mientras sigue en juego */
+  place: number | null;
+}
+
+export interface CopaFx {
+  id: number;
+  kind: 'flick' | 'kick' | 'clack' | 'wall' | 'post';
+  x: number;
+  y: number;
+  at: number;
+  /** 0..1, intensidad del golpe */
+  power: number;
+  playerId?: string;
+}
+
+export interface CopaView {
+  stage: 'countdown' | 'live' | 'goal' | 'roundEnd' | 'done';
+  round: number;
+  totalRounds: number;
+  /** reloj del servidor en el snapshot */
+  t: number;
+  /** fin de la fase actual (cuenta regresiva, festejo, resumen) */
+  until: number;
+  goals: CopaGoal[];
+  pucks: CopaPuck[];
+  ball: { x: number; y: number; vx: number; vy: number };
+  players: CopaPlayer[];
+  lastGoal: { victim: string; scorer: string | null; own: boolean; at: number } | null;
+  /** puntos del minijuego acumulados */
+  totals: Record<string, number>;
+  roundSummary: { playerId: string; place: number; points: number; goals: number }[] | null;
+  fx: CopaFx[];
+  /** multiplicador del ancho de los arcos: crece si pasa mucho sin goles */
+  widen: number;
+  /** modo práctica (un solo jugador contra un arco vacío) */
+  solo: boolean;
+}
+
+/* ─────────────────────────────── 8. FÓRMULA 99 ───────────────────────────── */
+
+export type F99Item = 'turbo' | 'banana' | 'oil' | 'missile' | 'bomb' | 'zap' | 'shield';
+
+export interface F99Car {
+  playerId: string;
+  x: number;
+  y: number;
+  /** rumbo, radianes */
+  a: number;
+  vx: number;
+  vy: number;
+  item: F99Item | null;
+  /** cuándo agarró el objeto (para la ruleta del cliente) */
+  itemAt: number;
+  spinUntil: number;
+  spinDir: number;
+  boostUntil: number;
+  /** envión de las flechas del piso */
+  padUntil: number;
+  shrinkUntil: number;
+  oilUntil: number;
+  shieldUntil: number;
+  /** vuelta actual, empezando en 1 */
+  lap: number;
+  /** progreso total sobre la pista, en vueltas (2.5 = mitad de la tercera) */
+  progress: number;
+  place: number;
+  finishedAt: number | null;
+  offTrack: boolean;
+}
+
+export interface F99Hazard {
+  id: number;
+  kind: 'banana' | 'oil' | 'bomb';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  owner: string;
+  at: number;
+  /** bomba: cuándo explota */
+  fuseAt: number;
+}
+
+export interface F99Missile {
+  id: number;
+  x: number;
+  y: number;
+  a: number;
+  owner: string;
+  target: string | null;
+}
+
+export interface F99Fx {
+  id: number;
+  kind: 'pickup' | 'boost' | 'spin' | 'boom' | 'zap' | 'lap' | 'finish' | 'block' | 'drop' | 'launch' | 'pad';
+  x: number;
+  y: number;
+  at: number;
+  playerId?: string;
+}
+
+export interface F99View {
+  stage: 'countdown' | 'race' | 'podium' | 'done';
+  race: number;
+  totalRaces: number;
+  /** índice de la pista en TRACKS */
+  track: number;
+  laps: number;
+  t: number;
+  /** largada (fin de la cuenta regresiva) */
+  startAt: number;
+  /** límite de la carrera (se activa cuando llega el primero) o fin del podio */
+  until: number | null;
+  cars: F99Car[];
+  hazards: F99Hazard[];
+  missiles: F99Missile[];
+  /** por caja: 0 = disponible, si no, timestamp en que reaparece */
+  boxes: number[];
+  fx: F99Fx[];
+  totals: Record<string, number>;
+  raceResults: { playerId: string; place: number; points: number; time: number | null }[] | null;
+}
+
+/* ─────────────────────────────── 9. ASHOOTATEE ───────────────────────────── */
+
+export type ShWeapon = 'pistol' | 'shotgun' | 'minigun' | 'sniper' | 'nades';
+
+export interface ShFighter {
+  /** id del jugador, o "dummy-N" para los muñecos de práctica */
+  playerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  face: -1 | 1;
+  alive: boolean;
+  lives: number;
+  respawnAt: number;
+  shieldUntil: number;
+  weapon: ShWeapon;
+  /** balas del arma especial (-1 = infinitas) */
+  ammo: number;
+  readyAt: number;
+  nadeReadyAt: number;
+  kills: number;
+  deaths: number;
+  /** puesto final (1 = ganó), null mientras tenga vidas */
+  place: number | null;
+  grounded: boolean;
+  /** recibió un golpe hace poco: para el parpadeo */
+  hitAt: number;
+}
+
+export interface ShBullet {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  owner: string;
+  kind: ShWeapon;
+}
+
+export interface ShNade {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  owner: string;
+  boomAt: number;
+}
+
+export interface ShCrate {
+  id: number;
+  x: number;
+  y: number;
+  weapon: ShWeapon;
+  landed: boolean;
+}
+
+export interface ShFx {
+  id: number;
+  kind: 'shot' | 'hit' | 'boom' | 'fall' | 'spawn' | 'pickup' | 'jump' | 'crate' | 'toss';
+  x: number;
+  y: number;
+  at: number;
+  playerId?: string;
+  dir?: number;
+  weapon?: ShWeapon;
+}
+
+export interface ShKill {
+  id: number;
+  killer: string | null;
+  victim: string;
+  at: number;
+}
+
+export interface ShooterView {
+  stage: 'countdown' | 'live' | 'done';
+  t: number;
+  until: number;
+  /** índice del mapa en SH_MAPS */
+  map: number;
+  /** reloj de los objetos móviles: ms desde el inicio de la partida */
+  clock0: number;
+  fighters: ShFighter[];
+  bullets: ShBullet[];
+  nades: ShNade[];
+  crates: ShCrate[];
+  fx: ShFx[];
+  feed: ShKill[];
 }

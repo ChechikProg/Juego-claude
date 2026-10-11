@@ -190,7 +190,11 @@ export const piramide: GameModule<PyrState> = {
       /* ── horizontal ── */
       const dir = launched ? 0 : (b.input.right ? 1 : 0) - (b.input.left ? 1 : 0);
       if (dir !== 0) {
-        b.vx += dir * PYR.ACCEL * dt;
+        // Más suave que antes: acelera de a poco, frena rápido al dar la vuelta
+        // y en el aire se controla un poco menos.
+        let accel = PYR.ACCEL * (b.grounded ? 1 : PYR.AIR_CONTROL);
+        if (Math.sign(b.vx) === -dir) accel *= PYR.TURN_BOOST;
+        b.vx += dir * accel * dt;
         b.face = dir as -1 | 1;
       } else {
         const damp = launched ? 0.6 : b.grounded ? PYR.GROUND_FRICTION : PYR.AIR_FRICTION;

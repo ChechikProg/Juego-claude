@@ -14,6 +14,8 @@ const BAILOUT_THRESHOLD = 20;
 const FEED_MAX = 14;
 /** a partir de acá el premio se anuncia a toda la sala */
 const FEED_MIN_WIN = 400;
+/** margen para que una diferencia de reloj con el cliente no rechace el giro siguiente */
+const SLOT_SLACK_MS = 200;
 
 interface Pending {
   amount: number;
@@ -277,7 +279,7 @@ export const timba: GameModule<TimbaState> = {
 
       /* ── tragamonedas ─────────────────────────────────────────────── */
       case 'sl:bet': {
-        if (ctx.now() < seat.sl.busyUntil || seat.sl.freeSpinsLeft > 0) return;
+        if (ctx.now() < seat.sl.busyUntil - SLOT_SLACK_MS || seat.sl.freeSpinsLeft > 0) return;
         const amount = num(d.amount);
         if (!SLOT_BETS.includes(amount)) return;
         seat.sl.bet = amount;
@@ -286,7 +288,7 @@ export const timba: GameModule<TimbaState> = {
       }
 
       case 'sl:spin': {
-        if (ctx.now() < seat.sl.busyUntil) return;
+        if (ctx.now() < seat.sl.busyUntil - SLOT_SLACK_MS) return;
         const free = seat.sl.freeSpinsLeft > 0;
         if (!free && seat.balance < seat.sl.bet) {
           ctx.toast(playerId, 'No te alcanza para girar.', 'bad');
