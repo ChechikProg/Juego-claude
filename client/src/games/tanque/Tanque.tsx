@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { TANK, TANK_H, TANK_W, buildMaze, stepBullet, type Wall } from '@shared/tanque';
-import type { PlayerPublic, TankPublic, TanqueView } from '@shared/types';
+import { POWER, POWERUPS, TANK, TANK_H, TANK_W, buildMaze, stepShot, type Wall } from '@shared/tanque';
+import type { PlayerPublic, TankKill, TankMine, TankPowerup, TankPublic, TanqueView } from '@shared/types';
 import { api, serverNow } from '@/net/socket';
 import { useCountdown, useRaf, useSize } from '@/lib/hooks';
 import { sfx } from '@/lib/sfx';
@@ -87,6 +87,25 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
       } else if (fx.kind === 'bounce') {
         sfx.bounce();
         burst(particles.current, fx.x, fx.y, 3, ['#ffffff', '#c8f560'], 60, 0.15);
+      } else if (fx.kind === 'pickup') {
+        if (fx.playerId === meId) sfx.pickup();
+        const color = fx.power ? POWERUPS[fx.power].color : '#ffffff';
+        burst(particles.current, fx.x, fx.y, 16, [color, '#ffffff'], 150, 0.5);
+      } else if (fx.kind === 'armor') {
+        sfx.post();
+        burst(particles.current, fx.x, fx.y, 18, ['#38bdf8', '#e0f2fe'], 180, 0.45);
+      } else if (fx.kind === 'mine') {
+        if (fx.playerId === meId) sfx.drop();
+      } else if (fx.kind === 'blast') {
+        sfx.boom();
+        burst(particles.current, fx.x, fx.y, 40, ['#fde68a', '#fb923c', '#ef4444', '#3b3b48'], 320, 0.7);
+        scorches.current.push({ x: fx.x, y: fx.y, at: fx.at });
+        if (scorches.current.length > 24) scorches.current.shift();
+        shake.current = Math.max(shake.current, 10);
+      } else if (fx.kind === 'laser') {
+        sfx.zap();
+      } else if (fx.kind === 'missile') {
+        sfx.missile();
       }
     }
     if (seenFx.current.size > 400) seenFx.current = new Set(view.fx.map((f) => f.id));
@@ -241,6 +260,7 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
     <div className="tq">
       <header className="tq__top">
         <span className="chip">💥 Todos contra todos</span>
+        {me?.alive && <PowerHud tank={me} />}
         {me && (
           <div className="tq__stats">
             <span className="tq__stat">
@@ -305,11 +325,11 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
                 <li key={k.id} className={`tq__kill anim-fade ${k.killer === meId || k.victim === meId ? 'tq__kill--me' : ''}`}>
                   {self ? (
                     <>
-                      <b>{victim?.name ?? '—'}</b> se voló solo 🤦
+                      <b>{victim?.name ?? '—'}</b> se voló solo {KILL_ICON[k.how ?? 'normal']} 🤦
                     </>
                   ) : (
                     <>
-                      <b>{killer?.name ?? '—'}</b> 💥 <b>{victim?.name ?? '—'}</b>
+                      <b>{killer?.name ?? '—'}</b> {KILL_ICON[k.how ?? 'normal']} <b>{victim?.name ?? '—'}</b>
                     </>
                   )}
                 </li>
@@ -331,6 +351,7 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
                   <Avatar avatar={p.avatar} size={24} offline={!p.connected} />
                   <span className="grow prow__name">{p.name}</span>
                   {!row.alive && <span aria-label="muerto">💀</span>}
+                  {row.alive && row.weapon && <span title={POWERUPS[row.weapon].name}>{POWERUPS[row.weapon].icon}</span>}
                   <span className={`prow__score tnum ${row.score < 0 ? 'tq__neg' : ''}`}>{row.score}</span>
                 </li>
               );
@@ -342,7 +363,20 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
               <div className="tq__reloadfill" style={{ width: `${reloadPct * 100}%` }} />
             </div>
           </div>
-          <p className="hint tq__help">WASD / flechas para moverte · mouse para apuntar · click o espacio para disparar</p>
+          <ul className="tq__legend" aria-label="Power-ups">
+            {Object.entries(POWERUPS).map(([k, p]) => (
+              <li key={k} title={p.desc}>
+                <span className="tq__legendicon" style={{ borderColor: p.color }}>
+                  {p.icon}
+                </span>
+                <span>
+                  <b>{p.name}</b>
+                  <span className="muted">{p.desc}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="hint tq__help">WASD / flechas para moverte · mouse para apuntar · click o espacio para disparar (o usar el power-up)</p>
         </aside>
       </div>
 
@@ -387,6 +421,60 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
       </footer>
     </div>
   );
+}
+
+const KILL_ICON: Record<TankKill['how'], string> = {
+  normal: '💥',
+  laser: '🔆',
+  missile: '🚀',
+  mine: '💣',
+};
+
+/** Lo que tenés encima: arma con cargas, escudo y turbo con su tiempo. */
+function PowerHud({ tank }: { tank: TankPublic }): JSX.Element | null {
+  const now = serverNow();
+  const armorLeft = tank.armorUntil - now;
+  const speedLeft = tank.speedUntil - now;
+  const items: JSX.Element[] = [];
+  if (tank.weapon) {
+    const p = POWERUPS[tank.weapon];
+    items.push(
+      <span key="w" className="tq__pw" style={{ borderColor: p.color }}>
+        <span className="tq__pwicon">{p.icon}</span>
+        <span className="tq__pwtext">
+          <b>{p.name}</b>
+          <span className="tnum">
+            {Array.from({ length: Math.min(6, tank.ammo) }, (_, i) => (
+              <i key={i} className="tq__pip" style={{ background: p.color }} />
+            ))}
+            {tank.ammo > 6 && ` ×${tank.ammo}`}
+          </span>
+        </span>
+      </span>,
+    );
+  }
+  for (const [key, left, total] of [
+    ['shield', armorLeft, POWER.SHIELD_MS],
+    ['speed', speedLeft, POWER.SPEED_MS],
+  ] as const) {
+    if (left <= 0) continue;
+    const p = POWERUPS[key];
+    items.push(
+      <span key={key} className="tq__pw" style={{ borderColor: p.color }}>
+        <span className="tq__pwicon">{p.icon}</span>
+        <span className="tq__pwtext">
+          <b>
+            {p.name} <span className="tnum muted">{Math.ceil(left / 1000)}s</span>
+          </b>
+          <span className="tq__pwbar">
+            <span style={{ width: `${Math.min(100, (left / total) * 100)}%`, background: p.color }} />
+          </span>
+        </span>
+      </span>,
+    );
+  }
+  if (!items.length) return <span className="tq__pw tq__pw--empty">Agarrá un power-up ✨</span>;
+  return <div className="tq__pws">{items}</div>;
 }
 
 /* ── partículas ───────────────────────────────────────────────────────────── */
@@ -519,6 +607,10 @@ function paint(ctx: CanvasRenderingContext2D, a: PaintArgs): void {
     ctx.fill();
   }
 
+  /* power-ups y minas, en el piso */
+  for (const p of v.powerups ?? []) drawPowerup(ctx, p, now);
+  for (const m of v.mines ?? []) drawMine(ctx, m, players.get(m.owner), m.owner === meId, now);
+
   /* tanques */
   for (const t of v.tanks) {
     let sm = smooth.get(t.playerId);
@@ -552,10 +644,18 @@ function paint(ctx: CanvasRenderingContext2D, a: PaintArgs): void {
   const elapsed = Math.max(0, Math.min(0.25, (now - v.t) / 1000));
   const steps = Math.ceil(elapsed / TANK.BULLET_STEP);
   for (const b of v.bullets) {
-    const p = { x: b.x, y: b.y, vx: b.vx, vy: b.vy };
-    for (let i = 0; i < steps; i++) stepBullet(p, elapsed / steps, walls);
+    const p = { x: b.x, y: b.y, vx: b.vx, vy: b.vy, kind: b.kind };
+    for (let i = 0; i < steps; i++) stepShot(p, elapsed / steps, walls);
     const owner = players.get(b.owner);
     const sp = Math.hypot(p.vx, p.vy) || 1;
+    if (b.kind === 'laser') {
+      drawLaser(ctx, p, sp);
+      continue;
+    }
+    if (b.kind === 'missile') {
+      drawMissile(ctx, p, sp, now, particles);
+      continue;
+    }
     ctx.strokeStyle = `hsla(${owner?.avatar.hue ?? 60} 90% 70% / 0.45)`;
     ctx.lineWidth = TANK.BULLET_R * 1.4;
     ctx.lineCap = 'round';
@@ -576,10 +676,11 @@ function paint(ctx: CanvasRenderingContext2D, a: PaintArgs): void {
   /* efectos de anillo */
   for (const fx of v.fx) {
     const age = (now - fx.at) / 1000;
-    if (fx.kind === 'boom' && age >= 0 && age < 0.5) {
+    if ((fx.kind === 'boom' || fx.kind === 'blast') && age >= 0 && age < 0.5) {
+      const big = fx.kind === 'blast' ? POWER.MINE_BLAST_R / 46 : 1;
       const t = age / 0.5;
       ctx.beginPath();
-      ctx.arc(fx.x, fx.y, 10 + t * 46, 0, TAU);
+      ctx.arc(fx.x, fx.y, (10 + t * 46) * big, 0, TAU);
       ctx.lineWidth = 7 * (1 - t);
       ctx.strokeStyle = `rgba(255, 200, 90, ${1 - t})`;
       ctx.stroke();
@@ -666,6 +767,20 @@ function drawTank(
     ctx.globalAlpha = 0.55 + pulse * 0.35;
   }
 
+  /* turbo: llamitas verdes atrás */
+  if (now < t.speedUntil) {
+    ctx.save();
+    ctx.rotate(sm.a);
+    for (let i = 0; i < 3; i++) {
+      const flick = 6 + Math.random() * 10;
+      ctx.fillStyle = `rgba(74, 222, 128, ${0.55 - i * 0.15})`;
+      ctx.beginPath();
+      ctx.ellipse(-R - 4 - i * 6, (i - 1) * 6, flick * 0.6, 3.2, 0, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   /* sombra */
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath();
@@ -707,7 +822,8 @@ function drawTank(
   const recoil = Math.max(0, (t.readyAt - now) / TANK.COOLDOWN) * 3.5;
   ctx.fillStyle = '#2a2d36';
   roundRect(ctx, 2 - recoil, -3, R + 9, 6, 2, true);
-  ctx.fillStyle = `hsl(${hue} 40% 78%)`;
+  // La punta del cañón toma el color del arma especial.
+  ctx.fillStyle = t.weapon ? POWERUPS[t.weapon].color : `hsl(${hue} 40% 78%)`;
   ctx.fillRect(R + 6 - recoil, -3.5, 5, 7);
   ctx.beginPath();
   ctx.arc(0, 0, R * 0.62, 0, TAU);
@@ -722,9 +838,157 @@ function drawTank(
   ctx.font = `${Math.round(R * 0.85)}px serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#000';
   ctx.fillText(p?.avatar.face ?? '🙂', 0, 1);
 
+  /* escudo de power-up: burbuja celeste (titila cuando se está por ir) */
+  const armorLeft = t.armorUntil - now;
+  if (armorLeft > 0 && (armorLeft > 2500 || Math.floor(now / 120) % 2 === 0)) {
+    ctx.globalAlpha = 1;
+    const bubble = ctx.createRadialGradient(0, 0, R * 0.6, 0, 0, R + 10);
+    bubble.addColorStop(0, 'rgba(56, 189, 248, 0)');
+    bubble.addColorStop(1, 'rgba(56, 189, 248, 0.38)');
+    ctx.fillStyle = bubble;
+    ctx.beginPath();
+    ctx.arc(0, 0, R + 10, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   ctx.restore();
+}
+
+/** Power-up en el piso: una baldosa que flota, con el color y el ícono de su tipo. */
+function drawPowerup(ctx: CanvasRenderingContext2D, p: TankPowerup, now: number): void {
+  const def = POWERUPS[p.kind];
+  const left = p.until - now;
+  // Titila en los últimos 3 segundos.
+  if (left < 3000 && Math.floor(now / 140) % 2 === 0) return;
+  const bob = Math.sin(now / 260 + p.id) * 2.5;
+  const pulse = 0.5 + 0.5 * Math.sin(now / 200 + p.id);
+  ctx.save();
+  ctx.translate(p.x, p.y + bob);
+
+  const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 30);
+  glow.addColorStop(0, hexA(def.color, 0.45 + pulse * 0.25));
+  glow.addColorStop(1, hexA(def.color, 0));
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, 0, 30, 0, TAU);
+  ctx.fill();
+
+  ctx.rotate(Math.sin(now / 700 + p.id) * 0.15);
+  ctx.fillStyle = '#0f172a';
+  roundRect(ctx, -14, -14, 28, 28, 7, true);
+  ctx.strokeStyle = def.color;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.font = '17px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#000';
+  ctx.fillText(def.icon, 0, 1);
+  ctx.restore();
+}
+
+/** Mina: disco oscuro con una lucecita. Las propias se ven bien; las ajenas, apenas. */
+function drawMine(ctx: CanvasRenderingContext2D, m: TankMine, owner: PlayerPublic | undefined, mine: boolean, now: number): void {
+  const armed = now >= m.armedAt;
+  const near = m.fuseAt - now < 3000;
+  ctx.save();
+  ctx.translate(m.x, m.y);
+  ctx.globalAlpha = mine ? 1 : 0.55;
+  ctx.fillStyle = '#1f2937';
+  ctx.beginPath();
+  ctx.arc(0, 0, 9, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = `hsl(${owner?.avatar.hue ?? 30} 70% 55%)`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * TAU + Math.PI / 4;
+    ctx.fillStyle = '#4b5563';
+    ctx.fillRect(Math.cos(a) * 9 - 1.5, Math.sin(a) * 9 - 1.5, 3, 3);
+  }
+  const blink = armed ? Math.floor(now / (near ? 90 : 400)) % 2 === 0 : true;
+  ctx.fillStyle = armed ? (blink ? '#ef4444' : '#7f1d1d') : '#facc15';
+  ctx.beginPath();
+  ctx.arc(0, 0, 3, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Rayo: una estela larga y brillante que atraviesa todo. */
+function drawLaser(ctx: CanvasRenderingContext2D, p: { x: number; y: number; vx: number; vy: number }, sp: number): void {
+  const len = 70;
+  const tx = p.x - (p.vx / sp) * len;
+  const ty = p.y - (p.vy / sp) * len;
+  const grad = ctx.createLinearGradient(tx, ty, p.x, p.y);
+  grad.addColorStop(0, 'rgba(232, 121, 249, 0)');
+  grad.addColorStop(1, 'rgba(250, 232, 255, 1)');
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(232, 121, 249, 0.35)';
+  ctx.lineWidth = 9;
+  ctx.beginPath();
+  ctx.moveTo(tx, ty);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 3.5;
+  ctx.stroke();
+}
+
+/** Misil: cuerpito rojo con aletas, mirando hacia donde va, y humo atrás. */
+function drawMissile(
+  ctx: CanvasRenderingContext2D,
+  p: { x: number; y: number; vx: number; vy: number },
+  sp: number,
+  now: number,
+  particles: Particle[],
+): void {
+  const a = Math.atan2(p.vy, p.vx);
+  if (Math.random() < 0.5) {
+    particles.push({
+      x: p.x - (p.vx / sp) * 9,
+      y: p.y - (p.vy / sp) * 9,
+      vx: (Math.random() - 0.5) * 20,
+      vy: (Math.random() - 0.5) * 20,
+      life: 0.45,
+      max: 0.45,
+      size: 3 + Math.random() * 3,
+      color: 'rgba(203, 213, 225, 0.7)',
+    });
+  }
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(a);
+  ctx.fillStyle = '#fb923c';
+  ctx.beginPath();
+  ctx.moveTo(-8, 0);
+  ctx.lineTo(-13 - Math.random() * 5, -2.5);
+  ctx.lineTo(-13 - Math.random() * 5, 2.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#ef4444';
+  roundRect(ctx, -8, -3.5, 14, 7, 3, true);
+  ctx.fillStyle = '#f8fafc';
+  ctx.beginPath();
+  ctx.moveTo(6, -3.5);
+  ctx.lineTo(11, 0);
+  ctx.lineTo(6, 3.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#991b1b';
+  ctx.fillRect(-8, -6, 4, 12);
+  ctx.restore();
+  void now;
+}
+
+function hexA(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
 function short(name: string): string {

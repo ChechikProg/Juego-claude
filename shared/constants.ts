@@ -108,6 +108,7 @@ export const GAMES: Record<GameId, GameMeta> = {
       'Todos son tanques en un laberinto visto desde arriba y aparecen en lugares al azar.',
       'Movete con WASD o las flechas, apuntá con el mouse y disparás con click o ESPACIO.',
       'Las balas rebotan en las paredes y también te matan a vos. Cuidado con los rebotes.',
+      'Aparecen power-ups en el laberinto: 🔱 triple, 🚀 misil teledirigido, 🔆 rayo que atraviesa paredes, 💣 minas, 🛡️ escudo que aguanta un impacto y ⚡ turbo. Las armas se usan con el mismo botón de disparo.',
       'Matar suma 1 punto y morir resta 1. Revivís a los 3 segundos. Cuando se acaba el tiempo, el que más puntos tenga gana.',
     ],
     minPlayers: 1,
@@ -136,7 +137,7 @@ export const GAMES: Record<GameId, GameMeta> = {
     ink: '#2A0606',
     howTo: [
       'Carrera de 3 vueltas vista desde arriba. Acelerá con ↑ o W, frená con ↓ o S y doblá con ← → o A D.',
-      'Una vez por vuelta podés agarrar un objeto en las cajas ❓. Usalo con ESPACIO: turbo, banana, aceite, misil, bomba, rayo o escudo.',
+      'Pasá por las cajas ❓ con la mano vacía y te llevás un objeto (hay dos filas por vuelta). Usalo con ESPACIO: turbo, banana, aceite, misil, bomba, rayo o escudo.',
       'Los que vienen atrás reciben mejores objetos. El pasto te frena y las flechas del piso te dan envión.',
       'Se corre en pistas distintas. Cada carrera reparte puntos por puesto y el que más sume se lleva 10, el segundo 5 y el tercero 3.',
     ],
@@ -150,10 +151,55 @@ export const GAMES: Record<GameId, GameMeta> = {
     accent: ['#F472B6', '#38BDF8'],
     ink: '#2A0A1C',
     howTo: [
-      'Las balas no lastiman: empujan. Para matar a alguien hay que tirarlo de las plataformas.',
+      'Las balas no lastiman: empujan. Para matar a alguien hay que tirarlo de las plataformas. Cada golpe te baja la resistencia 🛡️ y cuanto menos tenés, más lejos volás (se recarga al reaparecer).',
       'Movete con A D o ← →, saltá con W, ↑ o ESPACIO (hay doble salto) y bajá de una plataforma con S o ↓.',
       'Disparás con J o click. Con K o click derecho tirás una granada: tarda en explotar, no llega lejos y empuja muchísimo, también a vos.',
       'Del cielo caen cajas con armas. Tenés pocas vidas y al reaparecer sos invencible un segundo. El último en pie gana; cada baja suma.',
+    ],
+    minPlayers: 1,
+  },
+  torres: {
+    id: 'torres',
+    title: 'Las Torres de Titi',
+    subtitle: 'Apilá piezas con gravedad hasta tocar el cielo',
+    icon: '🗼',
+    accent: ['#60A5FA', '#F9A8D4'],
+    ink: '#0B1B3A',
+    howTo: [
+      'Cada uno tiene su base y del cielo le caen piezas. Al tocar la torre la pieza queda suelta: tiene peso, se puede torcer y se puede caer.',
+      'Mové con ← → o A D, girá con ↑ o W y bajá rápido con ↓ o S. Las que se caen de la base se pierden.',
+      'Cada 7 piezas (o al apoyar una dorada ✨) ganás un poder: 🧱 cemento que deja tu torre fija, 👻 una pieza maldita para todos los demás o 🌋 un terremoto en las torres rivales. Se usan con Q y E.',
+      'La meta está bien arriba: hay que sostener la torre por encima de la línea 3 segundos. Cuidado con el viento. El que llega primero suma más.',
+    ],
+    minPlayers: 1,
+  },
+  golf: {
+    id: 'golf',
+    title: 'Minigolf',
+    subtitle: 'Hoyos cada vez más traicioneros',
+    icon: '⛳',
+    accent: ['#4ADE80', '#FDE68A'],
+    ink: '#06240F',
+    howTo: [
+      'Todos juegan el mismo hoyo al mismo tiempo, visto desde arriba. Cada hoyo es más difícil que el anterior.',
+      'Arrastrá desde la pelota hacia atrás (como una gomera) para elegir dirección y fuerza, y soltá. Tirás de nuevo cuando la pelota se frena.',
+      'Arena que frena, agua que suma un golpe, hielo, molinos, rampas, hongos que rebotan y puertas que se mueven.',
+      'Tenés 1 minuto por hoyo y un máximo de golpes. Si no la metés a tiempo, te anotan el máximo. Gana el que menos golpes junte en todo el recorrido.',
+    ],
+    minPlayers: 1,
+  },
+  chori: {
+    id: 'chori',
+    title: 'El Último Choripán',
+    subtitle: 'Hay uno solo. Que sea tuyo.',
+    icon: '🌭',
+    accent: ['#F97316', '#FDE047'],
+    ink: '#2A1203',
+    howTo: [
+      'Hay un solo choripán en toda la cancha. Agarralo pasando por arriba y aguantalo todo lo que puedas.',
+      'Movete con WASD o las flechas. Con ESPACIO o SHIFT pegás un pique corto para escapar o para robar (se recarga en 3 segundos).',
+      'Si chocás al que lo tiene, se le cae y lo podés agarrar. Ojo con el perro que se lo lleva, el humo de la parrilla y el vendedor con el carrito, que atropella a todos.',
+      'Gana el que más segundos haya tenido el chori cuando termine el tiempo.',
     ],
     minPlayers: 1,
   },
@@ -162,10 +208,17 @@ export const GAMES: Record<GameId, GameMeta> = {
 /** Orden en el que se muestran en el lobby. */
 export const GAME_ORDER: GameId[] = [
   'vangogh', 'timba', 'smash', 'piramide', 'frases', 'tanque', 'copa', 'formula', 'shooter',
+  'torres', 'golf', 'chori',
 ];
 
 export const DEFAULT_CONFIG: RoomConfig = {
-  playlist: ['vangogh', 'timba', 'smash', 'piramide', 'frases', 'tanque', 'copa', 'formula', 'shooter'],
+  playlist: [
+    'vangogh', 'timba', 'smash', 'piramide', 'frases', 'tanque', 'copa', 'formula', 'shooter',
+    'torres', 'golf', 'chori',
+  ],
+  torresRounds: 1,
+  golfHoles: 6,
+  choriSeconds: 120,
   vangoghRounds: 2,
   timbaSeconds: 300,
   smashRounds: 3,
@@ -242,9 +295,9 @@ export const SMASH = {
   CROUCH_ACTIVE: 440,
   CROUCH_RECOVER: 260,
   /** multiplicador de velocidad por cada smash */
-  HIT_BOOST: 1.17,
+  HIT_BOOST: 1.07,
   /** aceleración pasiva por segundo */
-  RAMP: 0.016,
+  RAMP: 0.006,
   START_OMEGA: 1.9,
   MAX_OMEGA: 16,
   /** margen para compensar latencia al resolver una eliminación */

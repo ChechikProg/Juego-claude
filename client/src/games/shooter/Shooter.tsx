@@ -226,6 +226,15 @@ export function Shooter({ view }: { view: ShooterView }): JSX.Element {
             {me.lives <= 0 && <span className="muted">sin vidas</span>}
           </div>
         )}
+        {me && me.lives > 0 && (
+          <div className="sh__resist" title="Resistencia: baja con cada golpe y cuanto menos tenés, más lejos volás">
+            <span>🛡️</span>
+            <span className="sh__resistbar">
+              <span style={{ width: `${me.resist ?? 100}%`, background: resistColor((me.resist ?? 100) / 100) }} />
+            </span>
+            <span className="tnum">{me.resist ?? 100}%</span>
+          </div>
+        )}
         {me && (
           <div className="sh__weapon">
             <span className="sh__weaponicon">{weapon.icon}</span>
@@ -1055,11 +1064,26 @@ function drawFighter(
   ctx.fill();
   ctx.fillStyle = isMe ? '#fde047' : '#ffffff';
   ctx.fillText(label, x, tagY + 0.5 * ui);
+  // Resistencia: se vacía con cada golpe y vuelve a llenarse al reaparecer.
+  const resist = (f.resist ?? 100) / 100;
+  const bw = 36 * ui;
+  const by = tagY + 10 * ui;
+  ctx.fillStyle = 'rgba(8, 6, 14, 0.72)';
+  roundRect(ctx, x - bw / 2 - 1.5 * ui, by - 1.5 * ui, bw + 3 * ui, 6 * ui, 3 * ui);
+  ctx.fill();
+  ctx.fillStyle = resistColor(resist);
+  roundRect(ctx, x - bw / 2, by, Math.max(1, bw * resist), 3 * ui, 1.5 * ui);
+  ctx.fill();
   if (!dummy && f.lives > 0) {
     ctx.font = `${10 * ui}px serif`;
     ctx.fillStyle = '#fb7185';
     ctx.fillText('♥'.repeat(Math.min(6, f.lives)), x, tagY - 15 * ui);
   }
+}
+
+/** Verde con la resistencia llena, amarillo a la mitad, rojo vacía. */
+function resistColor(r: number): string {
+  return `hsl(${Math.round(4 + 126 * r)} 85% 55%)`;
 }
 
 function drawGun(ctx: CanvasRenderingContext2D, weapon: ShWeapon, recoil: boolean): void {

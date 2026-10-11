@@ -10,6 +10,8 @@ const GRASS_MARGIN = 62;
 /** si el más cercano salta más que esto de un tick al otro, no cuenta como avance */
 const MAX_PROGRESS_JUMP = 30;
 const OIL_TTL = 14_000;
+/** cajas por fila (ver `trackGeo`) */
+const BOX_ROW = 4;
 
 interface Car {
   playerId: string;
@@ -426,14 +428,17 @@ function touchBoxes(s: FState, car: Car, now: number): void {
     if (s.boxes[k] > now) continue;
     const b = geo.boxes[k];
     if ((b.x - car.x) ** 2 + (b.y - car.y) ** 2 > reach * reach) continue;
+    // Cada fila de cajas da un objeto por vuelta (antes era uno por vuelta en
+    // total y la segunda fila nunca daba nada). La caja sólo se rompe si da
+    // algo: si no, el que pasaba con la mano llena se la robaba al de atrás.
+    const rows = Math.max(1, geo.boxes.length / BOX_ROW);
+    const row = Math.floor(car.dist / geo.n) * rows + Math.floor(k / BOX_ROW);
+    if (car.item !== null || car.itemLap === row) continue;
     s.boxes[k] = now + F99.BOX_RESPAWN;
-    const lap = Math.floor(car.dist / geo.n);
-    if (car.item === null && car.itemLap !== lap) {
-      car.item = rollItem(car.place, s.cars.size);
-      car.itemAt = now;
-      car.itemLap = lap;
-      addFx(s, 'pickup', b.x, b.y, now, car.playerId);
-    }
+    car.item = rollItem(car.place, s.cars.size);
+    car.itemAt = now;
+    car.itemLap = row;
+    addFx(s, 'pickup', b.x, b.y, now, car.playerId);
   }
 }
 

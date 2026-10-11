@@ -228,4 +228,66 @@ export const sfx = {
     tone({ freq: 900, dur: 0.1, type: 'triangle', gain: 0.12, delay: 0.06 });
   },
   fall: () => tone({ freq: 900, to: 120, dur: 0.6, type: 'sine', gain: 0.12 }),
+
+  /** Las Torres de Titi */
+  thud: () => {
+    noise(0.06, 0.09, 300);
+    tone({ freq: 150, to: 90, dur: 0.09, type: 'sine', gain: 0.16 });
+  },
+  rotate: () => tone({ freq: 620, to: 760, dur: 0.045, type: 'triangle', gain: 0.07 }),
+  nudge: () => tone({ freq: 420, dur: 0.03, type: 'triangle', gain: 0.05 }),
+  lost: () => tone({ freq: 520, to: 140, dur: 0.45, type: 'triangle', gain: 0.1 }),
+  magic: () => {
+    [880, 1175, 1568].forEach((f, i) => tone({ freq: f, dur: 0.16, type: 'sine', gain: 0.09, delay: i * 0.06 }));
+  },
+  cement: () => {
+    noise(0.3, 0.14, 200);
+    tone({ freq: 110, to: 70, dur: 0.3, type: 'square', gain: 0.1 });
+  },
+  quake: () => {
+    noise(1.2, 0.18, 60);
+    tone({ freq: 55, to: 40, dur: 1.2, type: 'sawtooth', gain: 0.14, glide: false });
+  },
+  curse: () => {
+    tone({ freq: 300, to: 180, dur: 0.5, type: 'sawtooth', gain: 0.08 });
+    tone({ freq: 310, to: 170, dur: 0.5, type: 'sawtooth', gain: 0.06, delay: 0.05 });
+  },
+  wind: () => noise(1.6, 0.06, 900),
+
+  /** Minigolf */
+  putt: (power = 1) => {
+    noise(0.03, 0.06 + 0.08 * power, 2400);
+    tone({ freq: 1400, to: 900, dur: 0.05, type: 'sine', gain: 0.08 + 0.08 * power });
+  },
+  tock: () => tone({ freq: 800, to: 600, dur: 0.035, type: 'triangle', gain: 0.06 }),
+  splash: () => {
+    noise(0.5, 0.16, 500);
+    tone({ freq: 400, to: 120, dur: 0.3, type: 'sine', gain: 0.08 });
+  },
+  cup: () => {
+    tone({ freq: 500, to: 300, dur: 0.07, type: 'triangle', gain: 0.12 });
+    [784, 988, 1319].forEach((f, i) => tone({ freq: f, dur: 0.18, type: 'triangle', gain: 0.12, delay: 0.12 + i * 0.08 }));
+  },
+  boing: () => tone({ freq: 240, to: 720, dur: 0.16, type: 'sine', gain: 0.13 }),
+  warp: () => tone({ freq: 300, to: 1600, dur: 0.25, type: 'sine', gain: 0.09 }),
+
+  /** El Último Choripán */
+  grab: () => {
+    tone({ freq: 520, dur: 0.07, type: 'square', gain: 0.1 });
+    tone({ freq: 780, dur: 0.11, type: 'square', gain: 0.1, delay: 0.06 });
+  },
+  steal: () => {
+    noise(0.1, 0.16, 800);
+    tone({ freq: 880, to: 330, dur: 0.16, type: 'square', gain: 0.1 });
+  },
+  dash: () => noise(0.18, 0.08, 1500),
+  bark: () => {
+    tone({ freq: 520, to: 300, dur: 0.09, type: 'sawtooth', gain: 0.12 });
+    tone({ freq: 560, to: 280, dur: 0.1, type: 'sawtooth', gain: 0.12, delay: 0.16 });
+  },
+  honk: () => {
+    tone({ freq: 392, dur: 0.18, type: 'square', gain: 0.09 });
+    tone({ freq: 330, dur: 0.24, type: 'square', gain: 0.09, delay: 0.2 });
+  },
+  sizzle: () => noise(0.9, 0.07, 3000),
 };

@@ -62,6 +62,9 @@ export const PRACTICE_GOAL = '__practice';
 /** Semiancho angular base de cada arco según cuántos quedan. */
 export function goalHalf(n: number): number {
   if (n <= 1) return 0.34;
+  // Con pocos arcos sobra cancha y el gol sale demasiado fácil: se achican.
+  if (n === 2) return 0.19;
+  if (n === 3) return 0.235;
   return Math.min(0.3, (Math.PI / n) * 0.5);
 }
 

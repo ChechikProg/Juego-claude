@@ -82,6 +82,7 @@ function newFighter(id: string, lives: number, dummy = false): Fighter {
     place: null,
     grounded: false,
     hitAt: 0,
+    resist: 100,
     input: { left: false, right: false, fire: false },
     jumpQueued: false,
     nadeQueued: false,
@@ -256,6 +257,7 @@ export const shooter: GameModule<ShState> = {
           place: f.place,
           grounded: f.grounded,
           hitAt: f.hitAt,
+          resist: Math.round(f.resist),
         }),
       ),
       bullets: s.bullets.map((b) => ({ id: b.id, x: r1(b.x), y: r1(b.y), vx: r1(b.vx), vy: r1(b.vy), owner: b.owner, kind: b.kind })),
@@ -311,6 +313,7 @@ function spawn(s: ShState, f: Fighter, now: number, initial = false): void {
   f.weapon = 'pistol';
   f.ammo = -1;
   f.nadeBonus = 0;
+  f.resist = 100;
   f.face = f.x < SH.W / 2 ? 1 : -1;
   f.shieldUntil = now + SH.SHIELD_MS;
   if (!initial) addFx(s, 'spawn', f.x, f.y - SH.HEIGHT / 2, now, f.playerId);
@@ -532,13 +535,17 @@ function throwNade(s: ShState, f: Fighter, now: number): void {
 function knock(f: Fighter, kx: number, ky: number, by: string, now: number): boolean {
   if (!f.alive || now < f.shieldUntil) return false;
   if (now - f.lastHitAt > SH.COMBO_WINDOW) f.combo = 0;
-  const mult = Math.min(SH.COMBO_MAX, 1 + f.combo * SH.COMBO_STEP);
+  // Cuanto más gastada la resistencia, más lejos vuela.
+  const worn = 1 + (1 - f.resist / 100) * SH.RESIST_KNOCK;
+  const mult = Math.min(SH.COMBO_MAX, 1 + f.combo * SH.COMBO_STEP) * worn;
   f.combo += 1;
   f.vx += kx * mult;
   f.vy = Math.min(f.vy, 0) + ky * mult;
   if (ky < -60) f.grounded = false;
   const power = Math.hypot(kx, ky) * mult;
-  f.stunUntil = Math.max(f.stunUntil, now + 220 + power * 0.28);
+  const loss = Math.hypot(kx, ky) * SH.RESIST_LOSS;
+  f.resist = Math.max(0, f.resist - Math.min(SH.RESIST_MAX_LOSS, Math.max(SH.RESIST_MIN_LOSS, loss)));
+  f.stunUntil = Math.max(f.stunUntil, now + 220 + (power / worn) * 0.28);
   f.lastHitBy = by;
   f.lastHitAt = now;
   f.hitAt = now;

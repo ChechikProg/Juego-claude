@@ -6,6 +6,8 @@
  *  pueda predecir los rebotes entre snapshots.
  * ────────────────────────────────────────────────────────────────────────── */
 
+import type { TankBullet, TankPowerKind } from './types';
+
 export const TANK = {
   COLS: 10,
   ROWS: 7,
@@ -29,6 +31,53 @@ export const TANK = {
   /** paso fijo de la simulación de balas, en segundos */
   BULLET_STEP: 1 / 120,
 } as const;
+
+/* ── power-ups ────────────────────────────────────────────────────────────── */
+
+export const POWER = {
+  /** cada cuánto aparece uno nuevo (si hay lugar) */
+  SPAWN_EVERY: [5500, 9000] as [number, number],
+  /** el primero aparece rápido */
+  FIRST_SPAWN: 3000,
+  /** cuántos puede haber a la vez: base + uno cada tantos jugadores */
+  MAX_BASE: 3,
+  MAX_PER_PLAYERS: 3,
+  MAX_CAP: 6,
+  /** si nadie lo agarra, desaparece */
+  TTL: 20_000,
+  PICK_R: 26,
+  /** triple: tres balas en abanico */
+  TRIPLE_SPREAD: 0.24,
+  /** misil teledirigido: rebota en las paredes y gira de a poco hacia el objetivo */
+  MISSILE_SPEED: 220,
+  MISSILE_TURN: 3.2,
+  MISSILE_TTL: 6500,
+  /** rayo: rapidísimo, atraviesa paredes y tanques */
+  LASER_SPEED: 950,
+  LASER_TTL: 1150,
+  /** mina */
+  MINE_ARM_MS: 800,
+  MINE_FUSE_MS: 22_000,
+  MINE_TRIGGER_R: 34,
+  MINE_BLAST_R: 62,
+  MINE_MAX: 6,
+  SHIELD_MS: 15_000,
+  SPEED_MS: 7000,
+  SPEED_MULT: 1.6,
+  TURN_MULT: 1.35,
+} as const;
+
+/** Cargas que trae cada power-up y cómo se muestra. */
+export const POWERUPS: Record<TankPowerKind, { name: string; icon: string; color: string; ammo: number; desc: string }> = {
+  triple: { name: 'Triple', icon: '🔱', color: '#facc15', ammo: 4, desc: 'Tres balas en abanico' },
+  homing: { name: 'Misil', icon: '🚀', color: '#ef4444', ammo: 2, desc: 'Persigue al enemigo más cercano' },
+  shield: { name: 'Escudo', icon: '🛡️', color: '#38bdf8', ammo: 0, desc: 'Aguanta un impacto' },
+  speed: { name: 'Turbo', icon: '⚡', color: '#4ade80', ammo: 0, desc: 'Más velocidad y giro' },
+  mine: { name: 'Minas', icon: '💣', color: '#fb923c', ammo: 3, desc: 'Plantá una mina detrás tuyo' },
+  laser: { name: 'Rayo', icon: '🔆', color: '#e879f9', ammo: 3, desc: 'Atraviesa paredes y tanques' },
+};
+
+export const POWER_KINDS: TankPowerKind[] = ['triple', 'homing', 'shield', 'speed', 'mine', 'laser'];
 
 export const TANK_W = TANK.COLS * TANK.CELL;
 export const TANK_H = TANK.ROWS * TANK.CELL;
@@ -193,4 +242,39 @@ export function stepBullet(b: { x: number; y: number; vx: number; vy: number }, 
 /** Centro de una celda al azar. */
 export function cellCenter(col: number, row: number): { x: number; y: number } {
   return { x: (col + 0.5) * TANK.CELL, y: (row + 0.5) * TANK.CELL };
+}
+
+/**
+ * Avanza cualquier proyectil un paso. El rayo atraviesa paredes; el resto
+ * rebota. Devuelve true si rebotó.
+ */
+export function stepShot(
+  b: { x: number; y: number; vx: number; vy: number; kind?: TankBullet['kind'] },
+  dt: number,
+  walls: Wall[],
+): boolean {
+  if (b.kind === 'laser') {
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    return false;
+  }
+  return stepBullet(b, dt, walls);
+}
+
+/** Gira la velocidad hacia el objetivo sin pasarse de `turn` rad/s. */
+export function steerToward(
+  b: { x: number; y: number; vx: number; vy: number },
+  tx: number,
+  ty: number,
+  turn: number,
+  dt: number,
+): void {
+  const speed = Math.hypot(b.vx, b.vy) || 1;
+  const cur = Math.atan2(b.vy, b.vx);
+  const want = Math.atan2(ty - b.y, tx - b.x);
+  const d = ((((want - cur + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) - Math.PI;
+  const max = turn * dt;
+  const a = cur + Math.max(-max, Math.min(max, d));
+  b.vx = Math.cos(a) * speed;
+  b.vy = Math.sin(a) * speed;
 }

@@ -18,6 +18,26 @@ export const MAX_FILLS = 60;
 /** puntos internos de un dibujo que todos pusieron primero */
 const MAX_ROUND_POINTS = 100;
 
+/**
+ * Palabras que salieron hace poco en cualquier sala del servidor. Así no se
+ * repiten de una partida a la otra: recién vuelven cuando salió buena parte
+ * del mazo.
+ */
+const recentWords: string[] = [];
+const RECENT_MAX = Math.floor(WORDS.length * 0.7);
+
+function drawWord(used: Set<string>): WordEntry {
+  const recent = new Set(recentWords);
+  let pool = WORDS.filter((w) => !used.has(w.word) && !recent.has(w.word));
+  if (pool.length === 0) pool = WORDS.filter((w) => !used.has(w.word));
+  if (pool.length === 0) pool = WORDS;
+  const entry = pick(pool);
+  used.add(entry.word);
+  recentWords.push(entry.word);
+  if (recentWords.length > RECENT_MAX) recentWords.splice(0, recentWords.length - RECENT_MAX);
+  return entry;
+}
+
 interface Canvas {
   strokes: Stroke[];
   points: number;
@@ -280,11 +300,7 @@ function startRound(ctx: GameContext, s: VGState): void {
   s.roundEntries = [];
   s.noContest = false;
 
-  let candidate = pick(WORDS);
-  let guard = 0;
-  while (s.used.has(candidate.word) && guard++ < 60) candidate = pick(WORDS);
-  s.used.add(candidate.word);
-  s.entry = candidate;
+  s.entry = drawWord(s.used);
 
   s.artists = ctx.players().filter((p) => p.connected).map((p) => p.id);
   if (s.artists.length === 0) s.artists = ctx.players().map((p) => p.id);

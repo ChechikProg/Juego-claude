@@ -12,11 +12,14 @@ seguidos y gana el que más puntos junte: cada minijuego reparte **10 / 5 / 3**.
 | 🎰 | **Viva la Timba** | Arrancás con $1.000. Blackjack, ruleta europea, un tragamonedas de caramelos con cluster pays, tumbles y giros gratis, y un hipódromo de 6 caballos que paga x6 (cada uno ve su propia carrera). Gana el que más plata tenga al final. |
 | 🏓 | **Smash 360** | Estás fijo en el borde de un círculo con una pelota orbitando. Agachate para esquivarla o pegale para devolverla más rápido. Si te toca parado, afuera. |
 | 🏔️ | **Pirámide** | Todos arrancan en el piso de una pirámide de escalones cada vez más chicos. Mientras estés en la punta sumás puntos. Se puede saltar, empujar, aplastar al de abajo cayéndole encima y tirar un cañonazo que saca volando (cada 7 s). |
-| 💥 | **El Tanque Juan** | Tanques en un laberinto visto desde arriba. Las balas rebotan en las paredes y también te matan a vos. Matar suma 1, morir resta 1. |
+| 💥 | **El Tanque Juan** | Tanques en un laberinto visto desde arriba. Las balas rebotan en las paredes y también te matan a vos. Aparecen power-ups: triple, misil teledirigido, rayo que atraviesa paredes, minas, escudo y turbo. Matar suma 1, morir resta 1. |
 | 💬 | **Frases Chupete** | Aparece una frase con un hueco, todos la completan en 1 minuto y después se vota en anónimo cuál fue la mejor. Cada voto vale un punto. |
 | ⚽ | **Noche de Copa** | Fútbol de fichas en una cancha redonda: cada uno tiene un arco y tres fichas que se lanzan como una gomera (una cada 5 s). Al que le meten un gol queda afuera y su arco desaparece. Gol = +3, cada rival que aguantás = +2. |
-| 🏎️ | **Fórmula 99** | Carreras de 3 vueltas vistas desde arriba en tres pistas distintas. Una vez por vuelta se agarra un objeto de las cajas ❓ (turbo, banana, aceite, misil, bomba, rayo o escudo); los que vienen atrás reciben mejores. Cada carrera reparte puntos por puesto. |
+| 🏎️ | **Fórmula 99** | Carreras de 3 vueltas vistas desde arriba en tres pistas distintas. En cada fila de cajas ❓ se agarra un objeto (turbo, banana, aceite, misil, bomba, rayo o escudo); los que vienen atrás reciben mejores. Cada carrera reparte puntos por puesto. |
 | 🔫 | **Ashootatee** | Shooter de plataformas al estilo Gun Mayhem: las balas y las granadas no lastiman, empujan. Se muere cayéndose del mapa, hay pocas vidas, doble salto, cajas con armas y tres escenarios (uno con plataformas que se mueven). |
+| 🗼 | **Las Torres de Titi** | Del cielo caen piezas tipo Tetris pero con física de verdad: se tuercen, se apilan y se caen. Hay que sostener la torre 3 segundos arriba de una meta bien alta. Poderes: cemento que fija tu torre, pieza maldita para los rivales y terremoto. Piezas doradas y ráfagas de viento. |
+| ⛳ | **Minigolf** | Todos juegan el mismo hoyo a la vez, visto desde arriba. 12 hoyos de dificultad creciente (arena, agua, hielo, molinos, pendientes, puertas, portales); se juega una selección en orden. 1 minuto y un máximo de golpes por hoyo: si no la metés, te anotan el máximo. Gana el que menos golpes junte. |
+| 🌭 | **El Último Choripán** | Hay un solo chori en la cancha. Agarralo y aguantalo: si te chocan se te cae. Pique corto para escapar o robar, y eventos al azar: el perro que se lo lleva, el humo de la parrilla y el vendedor con el carrito. Gana el que más segundos lo tuvo. |
 
 ## Cómo correrlo
 
@@ -80,7 +83,7 @@ agrupados cada 40 ms y el cliente extrapola e interpola entre ellos. Smash 360
 además compensa latencia: cada input se evalúa contra el momento en que el
 jugador realmente apretó (estimado con el RTT), y una eliminación se resuelve
 160 ms después del impacto para darle lugar a un input que venía en camino.
-En Fórmula 99 el cliente predice su propio auto con la misma física que el
+Las Torres de Titi simulan las piezas con [planck](https://github.com/piqnt/planck.js) (Box2D): cada jugador tiene su propio mundo físico en el servidor. En Fórmula 99 el cliente predice su propio auto con la misma física que el
 servidor (`shared/formula.ts`) y se corrige suave hacia el snapshot, así el
 volante responde sin demora.
 

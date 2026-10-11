@@ -27,6 +27,12 @@ export const SH = {
   COMBO_STEP: 0.12,
   COMBO_MAX: 1.6,
   COMBO_WINDOW: 1700,
+  /** resistencia: arranca en 100 y cada golpe la baja según su fuerza (no se recupera hasta reaparecer) */
+  RESIST_LOSS: 0.0085,
+  RESIST_MIN_LOSS: 1,
+  RESIST_MAX_LOSS: 12,
+  /** con resistencia 0 te empujan así de más (1 + esto) */
+  RESIST_KNOCK: 1.6,
   /** fuera de estos márgenes te caíste */
   KILL_MARGIN_X: 260,
   KILL_BELOW: 160,
