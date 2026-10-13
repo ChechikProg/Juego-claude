@@ -31,6 +31,8 @@ interface SmoothActive {
   golden: boolean;
   x: number;
   y: number;
+  /** altura donde apoyaría si cayera derecho */
+  landY: number;
 }
 
 interface LaneCache {
@@ -144,10 +146,11 @@ export function Torres({ view }: { view: TorresView }): JSX.Element {
       const a = lane.active;
       if (!a) c.active = null;
       else if (!c.active || c.active.kind !== a.kind || Math.abs(c.active.y - a.y) > 6) {
-        c.active = { kind: a.kind, rot: a.rot, golden: a.golden, x: a.x, y: a.y };
+        c.active = { kind: a.kind, rot: a.rot, golden: a.golden, x: a.x, y: a.y, landY: a.landY };
       } else {
         c.active.rot = a.rot;
         c.active.golden = a.golden;
+        c.active.landY = a.landY;
       }
     }
   }, [view]);
@@ -331,7 +334,7 @@ export function Torres({ view }: { view: TorresView }): JSX.Element {
       const age = Math.max(0, Math.min(0.12, (now - v.t) / 1000));
       const fall = lane.playerId === meId && fastHeld.current ? TT.FAST_SPEED : TT.FALL_SPEED;
       const ty = lane.active.y - fall * age * 0.6;
-      c.active.x += (lane.active.x - c.active.x) * Math.min(1, dt * 24);
+      c.active.x += (lane.active.x - c.active.x) * Math.min(1, dt * 30);
       c.active.y += (ty - c.active.y) * Math.min(1, dt * 18);
     }
 
@@ -888,7 +891,7 @@ function paintMain(ctx: CanvasRenderingContext2D, a: MainArgs): void {
   ctx.closePath();
   ctx.fill();
 
-  /* guía de caída de la pieza activa */
+  /* guía de caída de la pieza activa: columnas marcadas y sombra donde va a apoyar */
   if (act) {
     const cells = cellsOf(act.kind, act.rot);
     let minX = Infinity;
@@ -899,11 +902,39 @@ function paintMain(ctx: CanvasRenderingContext2D, a: MainArgs): void {
       maxX = Math.max(maxX, cx + 0.5);
       minY = Math.min(minY, cy - 0.5);
     }
-    const guide = ctx.createLinearGradient(0, act.y + minY, 0, bottom);
-    guide.addColorStop(0, isMe ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.14)');
-    guide.addColorStop(1, 'rgba(255,255,255,0)');
+    const hasLanding = act.landY > -1.5 && act.landY < act.y;
+    const guideBottom = hasLanding ? act.landY + minY : bottom;
+    const guide = ctx.createLinearGradient(0, act.y + minY, 0, guideBottom);
+    guide.addColorStop(0, isMe ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.14)');
+    guide.addColorStop(1, isMe ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)');
     ctx.fillStyle = guide;
-    ctx.fillRect(act.x + minX, bottom - 1, maxX - minX, act.y + minY - bottom + 1);
+    ctx.fillRect(act.x + minX, guideBottom, maxX - minX, act.y + minY - guideBottom);
+    // Bordes de las columnas que ocupa la pieza, para ver la posición exacta.
+    ctx.strokeStyle = isMe ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 0.06;
+    ctx.setLineDash([0.3, 0.2]);
+    for (const ex of [act.x + minX, act.x + maxX]) {
+      ctx.beginPath();
+      ctx.moveTo(ex, act.y + minY);
+      ctx.lineTo(ex, guideBottom);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    if (hasLanding) {
+      // Sombra: dónde queda la pieza si la dejás caer derecho desde acá.
+      ctx.save();
+      ctx.translate(act.x, act.landY);
+      for (const [cx, cy] of cells) {
+        ctx.fillStyle = isMe ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.1)';
+        roundRect(ctx, cx - 0.5 + 0.03, cy - 0.5 + 0.03, 0.94, 0.94, 0.14);
+        ctx.fill();
+        ctx.strokeStyle = isMe ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 0.07;
+        roundRect(ctx, cx - 0.5 + 0.03, cy - 0.5 + 0.03, 0.94, 0.94, 0.14);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   /* piezas */

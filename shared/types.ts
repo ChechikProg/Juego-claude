@@ -875,6 +875,8 @@ export interface TorresActive {
   /** cuartos de vuelta (0..3) */
   rot: number;
   golden: boolean;
+  /** altura (origen de la pieza) donde apoyaría si cayera derecho desde acá */
+  landY: number;
 }
 
 export interface TorresLane {

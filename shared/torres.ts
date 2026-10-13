@@ -21,8 +21,8 @@ export const TT = {
   SPAWN_ABOVE: 8,
   FALL_SPEED: 2.4,
   FAST_SPEED: 13,
-  /** paso lateral de la pieza (media celda, como en el original) */
-  STEP: 0.5,
+  /** paso lateral de la pieza: una celda entera, siempre alineada a la grilla */
+  STEP: 1,
   GRAVITY: 18,
   FRICTION: 0.9,
   DENSITY: 1,

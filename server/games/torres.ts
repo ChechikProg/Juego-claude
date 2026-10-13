@@ -10,6 +10,8 @@ const DT = 1 / TT.TICK_HZ;
 const RIVAL_EVERY_MS = 180;
 /** media celda un poquito achicada: así las piezas no se traban en las juntas */
 const HALF = 0.49;
+/** la pieza no apoya en nada (cae al vacío): el cliente no dibuja sombra */
+const NO_LANDING = -99;
 
 interface PieceData {
   id: number;
@@ -29,6 +31,10 @@ interface Active {
   golden: boolean;
   /** tocó algo en el último paso */
   touched: boolean;
+  /** dónde apoyaría si cayera derecho (para la sombra del cliente) */
+  landY: number;
+  /** viento acumulado: la pieza se corre de a una celda entera, nunca a medias */
+  windAcc: number;
 }
 
 interface Lane {
@@ -113,7 +119,7 @@ export const torres: GameModule<TState> = {
     switch (type) {
       case 'move': {
         const dir = Math.sign(Number(d.dir) || 0);
-        if (dir && lane.active) shift(lane, dir * TT.STEP, 0);
+        if (dir && lane.active && shift(lane, dir * TT.STEP, 0)) updateLanding(lane);
         return;
       }
       case 'rotate':
@@ -210,6 +216,7 @@ export const torres: GameModule<TState> = {
               y: r2(a.body.getPosition().y),
               rot: a.rot,
               golden: a.golden,
+              landY: r2(a.landY),
             }
           : null,
         next: lane.queue[0]?.kind ?? 0,
@@ -379,7 +386,9 @@ function spawn(lane: Lane): void {
     allowSleep: false,
   });
   addCells(body, next.kind, 0);
-  lane.active = { body, kind: next.kind, rot: 0, golden: next.golden, touched: false };
+  lane.active = { body, kind: next.kind, rot: 0, golden: next.golden, touched: false, landY: y, windAcc: 0 };
+  snapX(lane.active);
+  updateLanding(lane);
   lane.pieces.set(body, { id: nextPieceId(), kind: next.kind, golden: next.golden, cemented: false, rot: 0, released: false });
 }
 
@@ -407,10 +416,18 @@ function stepLane(ctx: GameContext, s: TState, lane: Lane, now: number, wind: nu
 
   const a = lane.active;
   if (a) {
-    const pos = a.body.getPosition();
-    let vx = wind * TT.WIND_SPEED;
-    if ((vx < 0 && pos.x <= -TT.LANE_HALF) || (vx > 0 && pos.x >= TT.LANE_HALF)) vx = 0;
-    a.body.setLinearVelocity(new Vec2(vx, -(lane.fast ? TT.FAST_SPEED : TT.FALL_SPEED)));
+    // El viento corre la pieza de a una celda entera, así sigue alineada a la grilla.
+    if (wind) {
+      a.windAcc += wind * TT.WIND_SPEED * DT;
+      if (Math.abs(a.windAcc) >= TT.STEP) {
+        const dir = Math.sign(a.windAcc);
+        a.windAcc -= dir * TT.STEP;
+        if (shift(lane, dir * TT.STEP, 0)) updateLanding(lane);
+      }
+    } else {
+      a.windAcc = 0;
+    }
+    a.body.setLinearVelocity(new Vec2(0, -(lane.fast ? TT.FAST_SPEED : TT.FALL_SPEED)));
   }
 
   // Terremoto: la base se sacude de un lado al otro.
@@ -435,6 +452,8 @@ function stepLane(ctx: GameContext, s: TState, lane: Lane, now: number, wind: nu
   lane.world.step(DT, 8, 3);
 
   if (a && lane.active === a) {
+    // La torre se mueve un poco: refresco la sombra unas 10 veces por segundo.
+    if (s.tickNo % 6 === 0) updateLanding(lane);
     const y = a.body.getPosition().y;
     if (a.touched) release(ctx, s, lane, now, true);
     else if (y < -2) release(ctx, s, lane, now, false);
@@ -591,13 +610,36 @@ function overlaps(lane: Lane, body: Body): boolean {
   return false;
 }
 
-/** Corre la pieza; si choca, vuelve a donde estaba. */
+/** Extremos laterales (en celdas) de la pieza activa respecto de su origen. */
+function extents(a: Active): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const [cx, cy] of SHAPES[a.kind]) {
+    const [x] = rotCell(cx, cy, a.rot);
+    lo = Math.min(lo, x - 0.5);
+    hi = Math.max(hi, x + 0.5);
+  }
+  return [lo, hi];
+}
+
+/**
+ * Alinea la pieza a la grilla: el borde izquierdo cae siempre sobre una línea
+ * entera (como los bordes de la base), sin importar cómo quedó el centroide.
+ */
+function snapX(a: Active): void {
+  const p = a.body.getPosition();
+  const [lo] = extents(a);
+  a.body.setPosition(new Vec2(Math.round(p.x + lo) - lo, p.y));
+}
+
+/** Corre la pieza; si choca o se sale del carril, vuelve a donde estaba. */
 function shift(lane: Lane, dx: number, dy: number): boolean {
   const a = lane.active;
   if (!a) return false;
   const p = a.body.getPosition();
   const nx = p.x + dx;
-  if (Math.abs(nx) > TT.LANE_HALF + 0.01) return false;
+  const [lo, hi] = extents(a);
+  if (nx + lo < -TT.LANE_HALF - 0.01 || nx + hi > TT.LANE_HALF + 0.01) return false;
   const before = new Vec2(p.x, p.y);
   a.body.setPosition(new Vec2(nx, p.y + dy));
   if (overlaps(lane, a.body)) {
@@ -607,16 +649,48 @@ function shift(lane: Lane, dx: number, dy: number): boolean {
   return true;
 }
 
+/** Calcula dónde apoyaría la pieza si cayera derecho: baja de a poco hasta chocar. */
+function updateLanding(lane: Lane): void {
+  const a = lane.active;
+  if (!a) return;
+  const p = a.body.getPosition();
+  const x = p.x;
+  const y0 = p.y;
+  const floor = Math.max(lane.top, 0) - 6;
+  let y = y0;
+  let hit = false;
+  // Bajada gruesa y después afino con pasos cortos.
+  for (const step of [0.5, 0.1, 0.02]) {
+    for (;;) {
+      if (y - step < floor) break;
+      a.body.setPosition(new Vec2(x, y - step));
+      if (overlaps(lane, a.body)) {
+        hit = true;
+        break;
+      }
+      y -= step;
+    }
+  }
+  a.body.setPosition(new Vec2(x, y0));
+  a.landY = hit ? y : NO_LANDING;
+}
+
 function rotate(lane: Lane): void {
   const a = lane.active;
   if (!a) return;
   const old = a.rot;
   setShape(a, (a.rot + 1) % 4);
-  // Si no entra, prueba correrse un poco (como cualquier Tetris).
-  for (const [dx, dy] of [[0, 0], [TT.STEP, 0], [-TT.STEP, 0], [1, 0], [-1, 0], [0, 0.5]]) {
-    if (shift(lane, dx, dy)) return;
+  snapX(a);
+  // Si no entra, prueba correrse una o dos celdas (como cualquier Tetris).
+  for (const [dx, dy] of [[0, 0], [TT.STEP, 0], [-TT.STEP, 0], [2 * TT.STEP, 0], [-2 * TT.STEP, 0], [0, 0.5]]) {
+    if (shift(lane, dx, dy)) {
+      updateLanding(lane);
+      return;
+    }
   }
   setShape(a, old);
+  snapX(a);
+  updateLanding(lane);
 }
 
 function setShape(a: Active, rot: number): void {
