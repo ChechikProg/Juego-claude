@@ -236,16 +236,56 @@
   grid-template-columns: 1fr;
 }
 
+/* En celular la columna izquierda se desarma: jugadores, juegos y chat apilados. */
+.lobby__aside { display: contents; }
+.lobby__players { order: 1; }
+.lobby__games { order: 2; }
+.lobby__chat { order: 3; display: flex; flex-direction: column; max-height: 460px; }
+
 @media (min-width: 900px) {
   .lobby__grid {
-    grid-template-columns: 300px 1fr 300px;
+    grid-template-columns: 290px 1fr;
     align-items: start;
+  }
+
+  /* Jugadores arriba y chat abajo, fijos mientras se scrollean los juegos. */
+  .lobby__aside {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: sticky;
+    top: calc(var(--header-h) + 16px);
+    max-height: calc(100dvh - var(--header-h) - 32px);
+    min-height: 0;
+  }
+
+  /* Con muchos jugadores la lista se achica y scrollea sola, sin tapar el chat. */
+  .lobby__players {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 42%;
+    display: flex;
+    flex-direction: column;
+  }
+  .lobby__playerlist {
+    min-height: 0;
+    overflow-y: auto;
+    margin-right: -6px;
+    padding-right: 6px;
+  }
+
+  .lobby__chat {
+    flex: 1 1 auto;
+    min-height: 240px;
+    max-height: none;
   }
 }
 
-.lobby__chat { display: flex; flex-direction: column; max-height: 460px; }
+.picker { display: grid; grid-template-columns: 1fr; gap: 10px; align-items: start; }
 
-.picker { display: flex; flex-direction: column; gap: 10px; }
+@media (min-width: 1080px) {
+  .picker { grid-template-columns: 1fr 1fr; }
+}
 
 .pick {
   border-radius: var(--r);

@@ -60,14 +60,24 @@ export function Lobby(): JSX.Element {
       </section>
 
       <div className="lobby__grid">
-        <section className="card anim-rise" style={{ animationDelay: '60ms' }}>
-          <h2 className="card__title">
-            Jugadores <span className="chip">{room.players.length}</span>
-          </h2>
-          <PlayerList players={room.players} canKick={isHost} />
-        </section>
+        {/* Columna izquierda: jugadores arriba y chat abajo, fija mientras scrolleás los juegos. */}
+        <aside className="lobby__aside">
+          <section className="card lobby__players anim-rise" style={{ animationDelay: '60ms' }}>
+            <h2 className="card__title">
+              Jugadores <span className="chip">{room.players.length}</span>
+            </h2>
+            <div className="lobby__playerlist">
+              <PlayerList players={room.players} canKick={isHost} />
+            </div>
+          </section>
 
-        <section className="card anim-rise" style={{ animationDelay: '100ms' }}>
+          <section className="card lobby__chat anim-rise" style={{ animationDelay: '140ms' }}>
+            <h2 className="card__title">Chat</h2>
+            <Chat />
+          </section>
+        </aside>
+
+        <section className="card lobby__games anim-rise" style={{ animationDelay: '100ms' }}>
           <h2 className="card__title">
             Minijuegos
             {isHost ? <span className="chip chip--accent">elegís vos</span> : <span className="chip">los elige el anfitrión</span>}
@@ -143,11 +153,6 @@ export function Lobby(): JSX.Element {
               </div>
             )}
           </div>
-        </section>
-
-        <section className="card lobby__chat anim-rise" style={{ animationDelay: '140ms' }}>
-          <h2 className="card__title">Chat</h2>
-          <Chat />
         </section>
       </div>
     </div>
@@ -233,6 +238,78 @@ function Settings({ id, isHost }: { id: GameId; isHost: boolean }): JSX.Element 
         max={10}
         disabled={!isHost}
         onChange={(v) => step({ tanqueSeconds: v * 60 })}
+      />
+    );
+  }
+  if (id === 'copa') {
+    return (
+      <Stepper
+        label="rondas"
+        value={config.copaRounds}
+        min={1}
+        max={5}
+        disabled={!isHost}
+        onChange={(v) => step({ copaRounds: v })}
+      />
+    );
+  }
+  if (id === 'formula') {
+    return (
+      <Stepper
+        label={config.formulaRaces === 1 ? 'carrera' : 'carreras'}
+        value={config.formulaRaces}
+        min={1}
+        max={3}
+        disabled={!isHost}
+        onChange={(v) => step({ formulaRaces: v })}
+      />
+    );
+  }
+  if (id === 'shooter') {
+    return (
+      <Stepper
+        label={config.shooterLives === 1 ? 'vida' : 'vidas'}
+        value={config.shooterLives}
+        min={1}
+        max={6}
+        disabled={!isHost}
+        onChange={(v) => step({ shooterLives: v })}
+      />
+    );
+  }
+  if (id === 'torres') {
+    return (
+      <Stepper
+        label={config.torresRounds === 1 ? 'ronda' : 'rondas'}
+        value={config.torresRounds}
+        min={1}
+        max={3}
+        disabled={!isHost}
+        onChange={(v) => step({ torresRounds: v })}
+      />
+    );
+  }
+  if (id === 'golf') {
+    return (
+      <Stepper
+        label="hoyos"
+        value={config.golfHoles}
+        min={3}
+        max={12}
+        disabled={!isHost}
+        onChange={(v) => step({ golfHoles: v })}
+      />
+    );
+  }
+  if (id === 'chori') {
+    return (
+      <Stepper
+        label="min"
+        value={Math.round(config.choriSeconds / 60)}
+        min={1}
+        max={5}
+        disabled={!isHost}
+        onChange={(v) => step({ choriSeconds: v * 60 })}
       />
     );
   }

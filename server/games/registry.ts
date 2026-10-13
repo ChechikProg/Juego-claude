@@ -1,10 +1,16 @@
 import type { GameId } from '../../shared/types';
 import type { GameModule } from './kit';
+import { chori } from './chori';
+import { copa } from './copa';
+import { formula } from './formula';
 import { frases } from './frases';
+import { golf } from './golf';
 import { piramide } from './piramide';
+import { shooter } from './shooter';
 import { smash } from './smash';
 import { tanque } from './tanque';
 import { timba } from './timba/index';
+import { torres } from './torres';
 import { vanGogh } from './vangogh';
 
 /**
@@ -20,6 +26,12 @@ export const REGISTRY: Record<GameId, GameModule<any>> = {
   piramide: piramide,
   frases: frases,
   tanque: tanque,
+  copa: copa,
+  formula: formula,
+  shooter: shooter,
+  torres: torres,
+  golf: golf,
+  chori: chori,
 };
 
 export function getGame(id: GameId): GameModule<any> | undefined {

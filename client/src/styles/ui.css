@@ -50,6 +50,20 @@
   flex: 1;
 }
 
+/* En el celu la barra se compacta para que no se salga de la pantalla. */
+@media (max-width: 560px) {
+  .topbar { padding: 0 10px; }
+  .topbar__inner { gap: 6px; }
+  .topbar .logo--sm { font-size: 15px; white-space: nowrap; }
+  .topbar .code-pill { padding: 5px 10px; }
+  .topbar .code-pill .btn { display: none; }
+  .topbar .code-pill__code { font-size: 17px; }
+}
+
+@media (max-width: 400px) {
+  .topbar__inner > .logo { display: none; }
+}
+
 /* ══ Logo ═════════════════════════════════════════════════════════════════ */
 
 .logo {

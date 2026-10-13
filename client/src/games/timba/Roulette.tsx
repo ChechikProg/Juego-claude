@@ -30,7 +30,9 @@ export function Roulette({ v, balance }: { v: RouletteView; balance: number }): 
   const spinning = v.phase === 'spinning';
 
   // Cuando el servidor manda el número, giramos la rueda hasta dejarlo arriba.
-  useOnChange(v.phase === 'bets' ? null : `${v.phase}:${v.result}`, () => {
+  // La clave es el instante de frenado, que es único por tirada: el paso de
+  // 'spinning' a 'result' no la cambia y la rueda gira una sola vez.
+  useOnChange(v.phase === 'bets' || v.revealAt === null ? null : v.revealAt, () => {
     if (v.result === null) return;
     const idx = ROULETTE_WHEEL.indexOf(v.result as never);
     if (idx < 0) return;

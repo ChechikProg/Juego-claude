@@ -1,9 +1,15 @@
 import type { GameId } from '@shared/types';
+import { Chori } from './chori/Chori';
+import { Copa } from './copa/Copa';
+import { Formula } from './formula/Formula';
 import { Frases } from './frases/Frases';
+import { Golf } from './golf/Golf';
 import { Piramide } from './piramide/Piramide';
+import { Shooter } from './shooter/Shooter';
 import { Smash } from './smash/Smash';
 import { Tanque } from './tanque/Tanque';
 import { Timba } from './timba/Timba';
+import { Torres } from './torres/Torres';
 import { VanGogh } from './vangogh/VanGogh';
 
 /**
@@ -17,4 +23,10 @@ export const GAME_VIEWS: Record<GameId, (props: { view: never }) => JSX.Element>
   piramide: Piramide as never,
   frases: Frases as never,
   tanque: Tanque as never,
+  copa: Copa as never,
+  formula: Formula as never,
+  shooter: Shooter as never,
+  torres: Torres as never,
+  golf: Golf as never,
+  chori: Chori as never,
 };

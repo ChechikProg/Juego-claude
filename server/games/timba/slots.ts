@@ -241,5 +241,6 @@ export function slView(st: SlState): SlotsView {
     inBonus: st.inBonus,
     lastWin: st.lastWin,
     bonusWin: Math.round(st.bonusWin),
+    busyUntil: st.busyUntil,
   };
 }

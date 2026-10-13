@@ -3,7 +3,19 @@
  *  Todo lo que viaja por el socket está tipado acá.
  * ────────────────────────────────────────────────────────────────────────── */
 
-export type GameId = 'vangogh' | 'timba' | 'smash' | 'piramide' | 'frases' | 'tanque';
+export type GameId =
+  | 'vangogh'
+  | 'timba'
+  | 'smash'
+  | 'piramide'
+  | 'frases'
+  | 'tanque'
+  | 'copa'
+  | 'formula'
+  | 'shooter'
+  | 'torres'
+  | 'golf'
+  | 'chori';
 
 export interface Avatar {
   /** 0-359, define el gradiente del avatar */
@@ -61,6 +73,12 @@ export interface RoomConfig {
   piramideSeconds: number;
   frasesRounds: number;
   tanqueSeconds: number;
+  copaRounds: number;
+  formulaRaces: number;
+  shooterLives: number;
+  torresRounds: number;
+  golfHoles: number;
+  choriSeconds: number;
 }
 
 export interface RoomState {
@@ -92,21 +110,30 @@ export interface Stroke {
   w: number;
   /** 1 = goma */
   e?: 1;
+  /** 1 = balde: rellena desde el punto p[0],p[1] */
+  f?: 1;
   /** [x0,y0,x1,y1,...] */
   p: number[];
 }
 
-export interface Drawing {
-  playerId: string;
+/** Dibujo anónimo para rankear: el autor se revela recién en la galería. */
+export interface RankCard {
+  /** id anónimo, válido sólo esta ronda */
+  id: string;
   strokes: Stroke[];
 }
 
 export interface VanGoghEntry {
   playerId: string;
   strokes: Stroke[];
-  /** promedio de estrellas 1..5 */
-  avg: number;
-  votes: number;
+  /** 0..100: 100 = todos lo pusieron primero */
+  score: number;
+  /** cuántos lo pusieron primero */
+  firsts: number;
+  /** cuántos lo rankearon */
+  rankers: number;
+  /** puesto promedio (1 = mejor), null si nadie lo rankeó */
+  avgPlace: number | null;
   /** puntos internos sumados esta ronda */
   gained: number;
 }
@@ -124,20 +151,21 @@ export type VanGoghView =
       artists: number;
     }
   | {
-      stage: 'vote';
+      stage: 'rank';
       round: number;
       totalRounds: number;
       word: string;
       endsAt: number;
-      index: number;
-      count: number;
-      target: Drawing;
-      isMine: boolean;
-      myVote: number | null;
-      votesIn: number;
-      votersTotal: number;
-      /** se revela al cerrar la votación de ese dibujo */
-      reveal: { avg: number; votes: number } | null;
+      /** duración total de la etapa, para la barra de tiempo */
+      totalMs: number;
+      /** los dibujos de los demás, en un orden al azar propio de cada jugador */
+      cards: RankCard[];
+      /** tu propio dibujo, para que lo veas (no se rankea) */
+      mine: Stroke[] | null;
+      /** el ranking que mandaste (ids de mejor a peor), si ya lo mandaste */
+      myOrder: string[] | null;
+      submittedIds: string[];
+      rankersTotal: number;
     }
   | {
       stage: 'roundResults';
@@ -147,6 +175,8 @@ export type VanGoghView =
       endsAt: number;
       entries: VanGoghEntry[];
       totals: Record<string, number>;
+      /** true si no hubo con quién comparar (1 o 2 artistas) */
+      noContest: boolean;
     };
 
 /* ─────────────────────────────── 2. VIVA LA TIMBA ────────────────────────── */
@@ -246,6 +276,8 @@ export interface SlotsView {
   inBonus: boolean;
   lastWin: number;
   bonusWin: number;
+  /** timestamp de servidor en que termina la animación del último giro */
+  busyUntil: number;
 }
 
 /** Recorrido de un caballo: posiciones 0..1 en cada instante (ms desde la largada). */
@@ -329,6 +361,8 @@ export interface SmashView {
   t: number;
   /** cuándo arranca / termina la fase actual */
   until: number;
+  /** hasta acá la pelota está quieta esperando el saque */
+  serveUntil: number;
   ball: { angle: number; omega: number };
   /** golpes acumulados en la ronda */
   rally: number;
@@ -489,6 +523,31 @@ export type FrasesView =
 
 /* ───────────────────────────── 6. EL TANQUE JUAN ─────────────────────────── */
 
+/** Potenciadores que aparecen en el laberinto. */
+export type TankPowerKind = 'triple' | 'homing' | 'shield' | 'speed' | 'mine' | 'laser';
+/** Los que cambian el disparo y se gastan por carga. */
+export type TankWeapon = 'triple' | 'homing' | 'mine' | 'laser';
+
+export interface TankPowerup {
+  id: number;
+  kind: TankPowerKind;
+  x: number;
+  y: number;
+  /** desaparece si nadie lo agarra antes de esto */
+  until: number;
+}
+
+export interface TankMine {
+  id: number;
+  x: number;
+  y: number;
+  owner: string;
+  /** antes de esto no explota (le da tiempo al que la planta a irse) */
+  armedAt: number;
+  /** explota sola acá */
+  fuseAt: number;
+}
+
 export interface TankPublic {
   playerId: string;
   x: number;
@@ -506,6 +565,13 @@ export interface TankPublic {
   score: number;
   kills: number;
   deaths: number;
+  /** arma especial y cargas que le quedan */
+  weapon: TankWeapon | null;
+  ammo: number;
+  /** escudo de power-up: absorbe el próximo impacto (o se va solo acá) */
+  armorUntil: number;
+  /** súper velocidad hasta acá */
+  speedUntil: number;
 }
 
 export interface TankBullet {
@@ -515,15 +581,19 @@ export interface TankBullet {
   vx: number;
   vy: number;
   owner: string;
+  /** normal, rayo que atraviesa paredes o misil teledirigido */
+  kind: 'normal' | 'laser' | 'missile';
 }
 
 export interface TankFx {
   id: number;
-  kind: 'shot' | 'boom' | 'spawn' | 'bounce';
+  kind: 'shot' | 'boom' | 'spawn' | 'bounce' | 'pickup' | 'armor' | 'mine' | 'blast' | 'laser' | 'missile';
   x: number;
   y: number;
   at: number;
   playerId?: string;
+  /** qué power-up (en 'pickup') */
+  power?: TankPowerKind;
 }
 
 export interface TankKill {
@@ -531,6 +601,8 @@ export interface TankKill {
   killer: string;
   victim: string;
   at: number;
+  /** con qué lo mató */
+  how: 'normal' | 'laser' | 'missile' | 'mine';
 }
 
 export interface TanqueView {
@@ -542,6 +614,411 @@ export interface TanqueView {
   seed: number;
   tanks: TankPublic[];
   bullets: TankBullet[];
+  powerups: TankPowerup[];
+  mines: TankMine[];
   fx: TankFx[];
   feed: TankKill[];
+}
+
+/* ───────────────────────────── 7. NOCHE DE COPA ──────────────────────────── */
+
+export interface CopaGoal {
+  playerId: string;
+  /** ángulo del centro del arco sobre el borde de la cancha */
+  a: number;
+  /** semiancho angular del arco */
+  half: number;
+}
+
+export interface CopaPuck {
+  owner: string;
+  /** 0..2 */
+  i: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+export interface CopaPlayer {
+  playerId: string;
+  alive: boolean;
+  /** timestamp desde el que puede volver a lanzar */
+  readyAt: number;
+  /** goles hechos en el minijuego */
+  goals: number;
+  /** puesto en la ronda actual (1 = ganó), null mientras sigue en juego */
+  place: number | null;
+}
+
+export interface CopaFx {
+  id: number;
+  kind: 'flick' | 'kick' | 'clack' | 'wall' | 'post';
+  x: number;
+  y: number;
+  at: number;
+  /** 0..1, intensidad del golpe */
+  power: number;
+  playerId?: string;
+}
+
+export interface CopaView {
+  stage: 'countdown' | 'live' | 'goal' | 'roundEnd' | 'done';
+  round: number;
+  totalRounds: number;
+  /** reloj del servidor en el snapshot */
+  t: number;
+  /** fin de la fase actual (cuenta regresiva, festejo, resumen) */
+  until: number;
+  goals: CopaGoal[];
+  pucks: CopaPuck[];
+  ball: { x: number; y: number; vx: number; vy: number };
+  players: CopaPlayer[];
+  lastGoal: { victim: string; scorer: string | null; own: boolean; at: number } | null;
+  /** puntos del minijuego acumulados */
+  totals: Record<string, number>;
+  roundSummary: { playerId: string; place: number; points: number; goals: number }[] | null;
+  fx: CopaFx[];
+  /** multiplicador del ancho de los arcos: crece si pasa mucho sin goles */
+  widen: number;
+  /** modo práctica (un solo jugador contra un arco vacío) */
+  solo: boolean;
+}
+
+/* ─────────────────────────────── 8. FÓRMULA 99 ───────────────────────────── */
+
+export type F99Item = 'turbo' | 'banana' | 'oil' | 'missile' | 'bomb' | 'zap' | 'shield';
+
+export interface F99Car {
+  playerId: string;
+  x: number;
+  y: number;
+  /** rumbo, radianes */
+  a: number;
+  vx: number;
+  vy: number;
+  item: F99Item | null;
+  /** cuándo agarró el objeto (para la ruleta del cliente) */
+  itemAt: number;
+  spinUntil: number;
+  spinDir: number;
+  boostUntil: number;
+  /** envión de las flechas del piso */
+  padUntil: number;
+  shrinkUntil: number;
+  oilUntil: number;
+  shieldUntil: number;
+  /** vuelta actual, empezando en 1 */
+  lap: number;
+  /** progreso total sobre la pista, en vueltas (2.5 = mitad de la tercera) */
+  progress: number;
+  place: number;
+  finishedAt: number | null;
+  offTrack: boolean;
+}
+
+export interface F99Hazard {
+  id: number;
+  kind: 'banana' | 'oil' | 'bomb';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  owner: string;
+  at: number;
+  /** bomba: cuándo explota */
+  fuseAt: number;
+}
+
+export interface F99Missile {
+  id: number;
+  x: number;
+  y: number;
+  a: number;
+  owner: string;
+  target: string | null;
+}
+
+export interface F99Fx {
+  id: number;
+  kind: 'pickup' | 'boost' | 'spin' | 'boom' | 'zap' | 'lap' | 'finish' | 'block' | 'drop' | 'launch' | 'pad';
+  x: number;
+  y: number;
+  at: number;
+  playerId?: string;
+}
+
+export interface F99View {
+  stage: 'countdown' | 'race' | 'podium' | 'done';
+  race: number;
+  totalRaces: number;
+  /** índice de la pista en TRACKS */
+  track: number;
+  laps: number;
+  t: number;
+  /** largada (fin de la cuenta regresiva) */
+  startAt: number;
+  /** límite de la carrera (se activa cuando llega el primero) o fin del podio */
+  until: number | null;
+  cars: F99Car[];
+  hazards: F99Hazard[];
+  missiles: F99Missile[];
+  /** por caja: 0 = disponible, si no, timestamp en que reaparece */
+  boxes: number[];
+  fx: F99Fx[];
+  totals: Record<string, number>;
+  raceResults: { playerId: string; place: number; points: number; time: number | null }[] | null;
+}
+
+/* ─────────────────────────────── 9. ASHOOTATEE ───────────────────────────── */
+
+export type ShWeapon = 'pistol' | 'shotgun' | 'minigun' | 'sniper' | 'nades';
+
+export interface ShFighter {
+  /** id del jugador, o "dummy-N" para los muñecos de práctica */
+  playerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  face: -1 | 1;
+  alive: boolean;
+  lives: number;
+  respawnAt: number;
+  shieldUntil: number;
+  weapon: ShWeapon;
+  /** balas del arma especial (-1 = infinitas) */
+  ammo: number;
+  readyAt: number;
+  nadeReadyAt: number;
+  kills: number;
+  deaths: number;
+  /** puesto final (1 = ganó), null mientras tenga vidas */
+  place: number | null;
+  grounded: boolean;
+  /** recibió un golpe hace poco: para el parpadeo */
+  hitAt: number;
+  /** resistencia 0..100: cuanto más baja, más lejos te empujan */
+  resist: number;
+}
+
+export interface ShBullet {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  owner: string;
+  kind: ShWeapon;
+}
+
+export interface ShNade {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  owner: string;
+  boomAt: number;
+}
+
+export interface ShCrate {
+  id: number;
+  x: number;
+  y: number;
+  weapon: ShWeapon;
+  landed: boolean;
+}
+
+export interface ShFx {
+  id: number;
+  kind: 'shot' | 'hit' | 'boom' | 'fall' | 'spawn' | 'pickup' | 'jump' | 'crate' | 'toss';
+  x: number;
+  y: number;
+  at: number;
+  playerId?: string;
+  dir?: number;
+  weapon?: ShWeapon;
+}
+
+export interface ShKill {
+  id: number;
+  killer: string | null;
+  victim: string;
+  at: number;
+}
+
+export interface ShooterView {
+  stage: 'countdown' | 'live' | 'done';
+  t: number;
+  until: number;
+  /** índice del mapa en SH_MAPS */
+  map: number;
+  /** reloj de los objetos móviles: ms desde el inicio de la partida */
+  clock0: number;
+  fighters: ShFighter[];
+  bullets: ShBullet[];
+  nades: ShNade[];
+  crates: ShCrate[];
+  fx: ShFx[];
+  feed: ShKill[];
+}
+
+/* ──────────────────────────── 10. LAS TORRES DE TITI ─────────────────────── */
+
+export type TorresAbility = 'cement' | 'curse' | 'quake';
+
+export interface TorresActive {
+  kind: number;
+  x: number;
+  y: number;
+  /** cuartos de vuelta (0..3) */
+  rot: number;
+  golden: boolean;
+}
+
+export interface TorresLane {
+  playerId: string;
+  /**
+   * Piezas apoyadas, aplanadas de a 6: id, tipo, x·100, y·100, ángulo·1000,
+   * flags (1 = cemento, 2 = dorada, bits 2-3 = rotación). `null` = igual que en el último envío
+   * completo (las torres ajenas viajan con menos frecuencia).
+   */
+  pieces: number[] | null;
+  active: TorresActive | null;
+  next: number;
+  nextGolden: boolean;
+  /** altura actual de la torre (sólo piezas quietas) */
+  top: number;
+  /** la más alta que llegó en la ronda */
+  best: number;
+  /** desde cuándo está por encima de la meta */
+  holdSince: number | null;
+  finishedAt: number | null;
+  place: number | null;
+  powers: TorresAbility[];
+  /** piezas que faltan para el próximo poder */
+  charge: number;
+  shakeUntil: number;
+  placed: number;
+  lost: number;
+}
+
+export interface TorresFx {
+  id: number;
+  kind: 'place' | 'lost' | 'cement' | 'curse' | 'quake' | 'finish' | 'golden' | 'power';
+  playerId: string;
+  at: number;
+  /** quién lanzó el poder */
+  by?: string;
+  x?: number;
+  y?: number;
+}
+
+export interface TorresView {
+  stage: 'countdown' | 'live' | 'roundEnd' | 'done';
+  round: number;
+  totalRounds: number;
+  t: number;
+  until: number;
+  goal: number;
+  lanes: TorresLane[];
+  wind: { dir: -1 | 1; from: number; until: number } | null;
+  fx: TorresFx[];
+  totals: Record<string, number>;
+  roundResults: { playerId: string; place: number; points: number; time: number | null; height: number }[] | null;
+}
+
+/* ─────────────────────────────── 11. MINIGOLF ────────────────────────────── */
+
+export interface GolfBall {
+  playerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  moving: boolean;
+  /** golpes en este hoyo (con penalidades) */
+  strokes: number;
+  /** terminó el hoyo (embocó, se pasó del máximo o se le acabó el tiempo) */
+  done: boolean;
+  holed: boolean;
+  /** cuándo embocó, para la animación */
+  holedAt: number | null;
+}
+
+export interface GolfFx {
+  id: number;
+  kind: 'shot' | 'wall' | 'water' | 'sink' | 'bumper' | 'max' | 'timeout' | 'boost' | 'warp';
+  x: number;
+  y: number;
+  at: number;
+  playerId: string;
+  power?: number;
+}
+
+export interface GolfView {
+  stage: 'countdown' | 'live' | 'holeEnd' | 'done';
+  /** número de hoyo en la partida, empezando en 1 */
+  hole: number;
+  totalHoles: number;
+  /** índice del recorrido en GOLF_HOLES */
+  course: number;
+  t: number;
+  until: number;
+  /** reloj de los obstáculos móviles: ms desde que arrancó el hoyo */
+  clock0: number;
+  balls: GolfBall[];
+  /** golpes acumulados de toda la partida */
+  totals: Record<string, number>;
+  /** golpes por hoyo de cada jugador */
+  card: Record<string, number[]>;
+  /** recorridos ya jugados, para la tarjeta */
+  courses: number[];
+  fx: GolfFx[];
+  holeResults: { playerId: string; strokes: number; holed: boolean }[] | null;
+}
+
+/* ──────────────────────────── 12. EL ÚLTIMO CHORIPÁN ─────────────────────── */
+
+export interface ChoriPlayer {
+  playerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  /** hacia dónde mira, radianes */
+  a: number;
+  sprintUntil: number;
+  sprintReadyAt: number;
+  /** aturdido (lo atropelló el carrito o lo chocaron fuerte) */
+  stunUntil: number;
+  /** ms acumulados con el chori en la mano */
+  held: number;
+}
+
+export interface ChoriFx {
+  id: number;
+  kind: 'grab' | 'steal' | 'drop' | 'sprint' | 'bump' | 'dog' | 'dogbite' | 'dogdrop' | 'cart' | 'smoke' | 'run';
+  x: number;
+  y: number;
+  at: number;
+  playerId?: string;
+  by?: string;
+}
+
+export interface ChoriView {
+  stage: 'countdown' | 'live' | 'done';
+  t: number;
+  until: number;
+  /** índice del mapa en CHORI_MAPS */
+  map: number;
+  players: ChoriPlayer[];
+  chori: { x: number; y: number; vx: number; vy: number; holder: string | null; dog: boolean; z: number };
+  dog: { x: number; y: number; vx: number; vy: number; hasChori: boolean } | null;
+  cart: { x: number; y: number; vx: number; vy: number } | null;
+  smoke: { side: 'left' | 'right' | 'top' | 'bottom'; from: number; until: number } | null;
+  /** aviso del próximo evento (para el cartel) */
+  event: { kind: 'dog' | 'cart' | 'smoke'; at: number } | null;
+  fx: ChoriFx[];
 }
