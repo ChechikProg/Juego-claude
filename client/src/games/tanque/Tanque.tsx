@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { POWER, POWERUPS, TANK, TANK_H, TANK_W, buildMaze, stepShot, type Wall } from '@shared/tanque';
+import { POWER, POWERUPS, TANK, TANK_H, TANK_W, buildMaze, pushOutOfWalls, stepShot, type Wall } from '@shared/tanque';
 import type { PlayerPublic, TankKill, TankMine, TankPowerup, TankPublic, TanqueView } from '@shared/types';
-import { api, serverNow } from '@/net/socket';
+import { api, currentRtt, serverNow } from '@/net/socket';
 import { useCountdown, useRaf, useSize } from '@/lib/hooks';
 import { sfx } from '@/lib/sfx';
 import { usePlayerMap, useStore } from '@/state/store';
@@ -17,6 +17,15 @@ interface Smooth {
   ta: number;
   /** avance acumulado para animar las orugas */
   tread: number;
+}
+
+/** Tanque propio simulado en el cliente para que manejar no espere al servidor. */
+interface Pred {
+  x: number;
+  y: number;
+  a: number;
+  /** dónde estaba la predicción en cada frame (hora del servidor) */
+  hist: { t: number; x: number; y: number; a: number }[];
 }
 
 interface Particle {
@@ -56,6 +65,7 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
   const myAim = useRef<number | null>(null);
   const lastAimSent = useRef(0);
   const keys = useRef({ up: false, down: false, left: false, right: false });
+  const pred = useRef<Pred | null>(null);
   const sentInput = useRef('0:0');
   const firing = useRef(false);
   const lastFire = useRef(0);
@@ -238,6 +248,15 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
     // Disparo sostenido.
     if (firing.current) fireNow();
 
+    const v = snap.current;
+    const mine = v.tanks.find((t) => t.playerId === meId);
+    if (mine?.alive && v.stage === 'live') {
+      const k = keys.current;
+      pred.current = predictTank(pred.current, mine, v.t, walls, (k.up ? 1 : 0) - (k.down ? 1 : 0), (k.right ? 1 : 0) - (k.left ? 1 : 0), dt);
+    } else {
+      pred.current = null;
+    }
+
     paint(ctx, {
       v: snap.current,
       walls,
@@ -247,6 +266,7 @@ export function Tanque({ view }: { view: TanqueView }): JSX.Element {
       scorches: scorches.current,
       players,
       meId,
+      pred: pred.current,
       myAim: myAim.current,
       dt,
       shake,
@@ -568,13 +588,82 @@ interface PaintArgs {
   scorches: Scorch[];
   players: Map<string, PlayerPublic>;
   meId: string | null;
+  pred: Pred | null;
   myAim: number | null;
   dt: number;
   shake: React.MutableRefObject<number>;
 }
 
+/**
+ * Avanza el tanque propio con el input local y la misma física del servidor, y
+ * lo corrige contra el snapshot. El servidor recibe cada input media ida y
+ * vuelta tarde, así que su posición en `serverT` equivale a la nuestra en
+ * `serverT - rtt/2`: comparamos contra ese punto del historial y no contra el
+ * presente, que si no la corrección tira siempre para atrás.
+ */
+function predictTank(
+  p: Pred | null,
+  srv: TankPublic,
+  serverT: number,
+  walls: Wall[],
+  move: number,
+  turn: number,
+  dt: number,
+): Pred {
+  const now = serverNow();
+  if (!p) p = { x: srv.x, y: srv.y, a: srv.a, hist: [] };
+
+  const fast = now < srv.speedUntil;
+  p.a += turn * TANK.TURN * (fast ? POWER.TURN_MULT : 1) * dt;
+  const speed = (move >= 0 ? TANK.SPEED : TANK.SPEED * TANK.REVERSE) * (fast ? POWER.SPEED_MULT : 1);
+  p.x += Math.cos(p.a) * move * speed * dt;
+  p.y += Math.sin(p.a) * move * speed * dt;
+  pushOutOfWalls(p, TANK.TANK_R, walls);
+  p.x = Math.max(TANK.TANK_R, Math.min(TANK_W - TANK.TANK_R, p.x));
+  p.y = Math.max(TANK.TANK_R, Math.min(TANK_H - TANK.TANK_R, p.y));
+
+  p.hist.push({ t: now, x: p.x, y: p.y, a: p.a });
+  while (p.hist.length > 2 && p.hist[0].t < now - 1500) p.hist.shift();
+
+  const at = serverT - currentRtt() / 2;
+  let past = p.hist[0];
+  for (const h of p.hist) {
+    if (h.t > at) break;
+    past = h;
+  }
+  const ex = srv.x - past.x;
+  const ey = srv.y - past.y;
+  const ea = angleDelta(srv.a, past.a);
+  if (Math.hypot(ex, ey) > 90 || Math.abs(ea) > 1.2) {
+    // Respawn, empujón fuerte o predicción perdida: confiamos en el servidor.
+    return { x: srv.x, y: srv.y, a: srv.a, hist: [] };
+  }
+  // Corrección suave; corremos también el historial para no aplicar el mismo
+  // error dos veces mientras no llega el próximo snapshot.
+  const c = Math.min(1, dt * 8);
+  const cx = ex * c;
+  const cy = ey * c;
+  const ca = ea * c;
+  p.x += cx;
+  p.y += cy;
+  p.a += ca;
+  for (const h of p.hist) {
+    h.x += cx;
+    h.y += cy;
+    h.a += ca;
+  }
+  return p;
+}
+
+function angleDelta(target: number, from: number): number {
+  let d = (target - from) % TAU;
+  if (d > Math.PI) d -= TAU;
+  else if (d < -Math.PI) d += TAU;
+  return d;
+}
+
 function paint(ctx: CanvasRenderingContext2D, a: PaintArgs): void {
-  const { v, walls, floor, smooth, particles, scorches, players, meId, myAim, dt, shake } = a;
+  const { v, walls, floor, smooth, particles, scorches, players, meId, pred, myAim, dt, shake } = a;
   const now = serverNow();
 
   ctx.save();
@@ -632,6 +721,11 @@ function paint(ctx: CanvasRenderingContext2D, a: PaintArgs): void {
       sm.a = lerpAngle(sm.a, t.a, k);
     }
     const isMe = t.playerId === meId;
+    if (isMe && pred) {
+      sm.x = pred.x;
+      sm.y = pred.y;
+      sm.a = pred.a;
+    }
     sm.ta = isMe && myAim !== null ? myAim : lerpAngle(sm.ta, t.ta, k);
     // Las orugas avanzan con la distancia recorrida, en la dirección del casco.
     sm.tread += ((sm.x - px) * Math.cos(sm.a) + (sm.y - py) * Math.sin(sm.a)) * 0.6;

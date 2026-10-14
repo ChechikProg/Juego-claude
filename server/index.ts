@@ -26,6 +26,10 @@ const io = new Server(http, {
   maxHttpBufferSize: 5e5,
   pingInterval: 20_000,
   pingTimeout: 25_000,
+  // Comprimir cada snapshot cuesta CPU y suma milisegundos en los dos extremos;
+  // los estados ya viajan recortados (ver `compact`).
+  perMessageDeflate: false,
+  httpCompression: false,
 });
 
 const hub = new Hub(io);

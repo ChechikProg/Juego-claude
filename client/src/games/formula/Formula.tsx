@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { F99, TRACKS, driveStep, nearestSample, trackGeo, type DriveState, type TrackDef, type TrackGeo } from '@shared/formula';
 import type { F99Car, F99Item, F99View, PlayerPublic } from '@shared/types';
-import { api, serverNow } from '@/net/socket';
+import { api, currentRtt, serverNow } from '@/net/socket';
 import { formatClock, useCountdown, useRaf, useSize } from '@/lib/hooks';
 import { sfx } from '@/lib/sfx';
 import { usePlayerMap, useStore } from '@/state/store';
@@ -65,7 +65,7 @@ export function Formula({ view }: { view: F99View }): JSX.Element {
   const grass = useRef<{ track: number; pattern: CanvasPattern | null }>({ track: -1, pattern: null });
 
   const smooth = useRef(new Map<string, Smooth>());
-  const pred = useRef<(DriveState & { idx: number }) | null>(null);
+  const pred = useRef<Pred | null>(null);
   const cam = useRef<{ x: number; y: number } | null>(null);
   const particles = useRef<Particle[]>([]);
   const seenFx = useRef(new Set<number>());
@@ -293,12 +293,10 @@ export function Formula({ view }: { view: F99View }): JSX.Element {
     // Predicción del auto propio con la misma física del servidor.
     const mine = v.cars.find((c) => c.playerId === meId);
     if (mine && v.stage === 'race') {
-      const elapsed = Math.max(0, Math.min(0.12, (now - v.t) / 1000));
-      const sx = mine.x + mine.vx * elapsed;
-      const sy = mine.y + mine.vy * elapsed;
       let p = pred.current;
-      if (!p || Math.hypot(p.x - sx, p.y - sy) > 70 || now < mine.spinUntil) {
-        p = { ...toDrive(mine), x: sx, y: sy, idx: -1 };
+      if (!p || now < mine.spinUntil) {
+        const elapsed = Math.max(0, Math.min(0.12, (now - v.t) / 1000));
+        p = { ...toDrive(mine), x: mine.x + mine.vx * elapsed, y: mine.y + mine.vy * elapsed, idx: -1, hist: [] };
       } else {
         Object.assign(p, {
           spinUntil: mine.spinUntil,
@@ -314,14 +312,7 @@ export function Formula({ view }: { view: F99View }): JSX.Element {
       p.offTrack = near.d > geo.width / 2 + F99.CAR_R * 0.2;
       const done = mine.finishedAt !== null;
       driveStep(p, done ? 0 : input.current.throttle, done ? 0 : input.current.steer, dt, now);
-      // Corrección suave hacia lo que dice el servidor.
-      const k = Math.min(1, dt * 4);
-      p.x += (sx - p.x) * k;
-      p.y += (sy - p.y) * k;
-      p.vx += (mine.vx - p.vx) * k;
-      p.vy += (mine.vy - p.vy) * k;
-      p.a += angDiff(mine.a, p.a) * Math.min(1, dt * 3);
-      pred.current = p;
+      pred.current = reconcile(p, mine, v.t, now, dt);
     } else {
       pred.current = null;
     }
@@ -562,6 +553,47 @@ function lightsOn(left: number): number {
 function formatClockMs(ms: number): string {
   const tenths = Math.floor((ms % 1000) / 100);
   return `${formatClock(Math.floor(ms / 1000) * 1000)}.${tenths}`;
+}
+
+interface Pred extends DriveState {
+  idx: number;
+  /** dónde estaba la predicción en cada frame (hora del servidor) */
+  hist: { t: number; x: number; y: number; vx: number; vy: number; a: number }[];
+}
+
+/**
+ * Corrige la predicción contra el snapshot. El servidor ve cada input media ida
+ * y vuelta tarde: su estado en `serverT` equivale al nuestro en
+ * `serverT - rtt/2`. Comparar contra el presente tiraba el auto para atrás todo
+ * el tiempo (más cuanto más lejos el servidor).
+ */
+function reconcile(p: Pred, srv: F99Car, serverT: number, now: number, dt: number): Pred | null {
+  p.hist.push({ t: now, x: p.x, y: p.y, vx: p.vx, vy: p.vy, a: p.a });
+  while (p.hist.length > 2 && p.hist[0].t < now - 1500) p.hist.shift();
+
+  const at = serverT - currentRtt() / 2;
+  let past = p.hist[0];
+  for (const h of p.hist) {
+    if (h.t > at) break;
+    past = h;
+  }
+  const ex = srv.x - past.x;
+  const ey = srv.y - past.y;
+  // Choque fuerte o predicción perdida: que el próximo frame arranque del servidor.
+  if (Math.hypot(ex, ey) > 70) return null;
+
+  // Corrección suave; corremos el historial para no aplicar dos veces el mismo error.
+  const k = Math.min(1, dt * 4);
+  const ka = Math.min(1, dt * 3);
+  const c = { x: ex * k, y: ey * k, vx: (srv.vx - past.vx) * k, vy: (srv.vy - past.vy) * k, a: angDiff(srv.a, past.a) * ka };
+  for (const h of [p, ...p.hist]) {
+    h.x += c.x;
+    h.y += c.y;
+    h.vx += c.vx;
+    h.vy += c.vy;
+    h.a += c.a;
+  }
+  return p;
 }
 
 function toDrive(c: F99Car): DriveState {

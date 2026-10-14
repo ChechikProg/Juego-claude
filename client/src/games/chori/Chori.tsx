@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { CH, CHORI_MAPS, type ChoriMap } from '@shared/chori';
+import { CH, CHORI_MAPS, pushOut, type ChoriMap } from '@shared/chori';
 import type { ChoriPlayer, ChoriView, PlayerPublic } from '@shared/types';
-import { api, serverNow } from '@/net/socket';
+import { api, currentRtt, serverNow } from '@/net/socket';
 import { useCountdown, useRaf, useSize } from '@/lib/hooks';
 import { sfx } from '@/lib/sfx';
 import { usePlayerMap, useStore } from '@/state/store';
 import { Avatar, RankBadge, Timer } from '@/components/ui';
 
 const TAU = Math.PI * 2;
+
+/** Corredor propio simulado en el cliente para que moverse no espere al servidor. */
+interface Pred {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  /** pique arrancado acá, antes de que el servidor lo confirme */
+  sprintUntil: number;
+  /** dónde estaba la predicción en cada frame (hora del servidor) */
+  hist: { t: number; x: number; y: number; vx: number; vy: number }[];
+}
 
 interface Smooth {
   x: number;
@@ -105,8 +117,10 @@ export function Chori({ view }: { view: ChoriView }): JSX.Element {
   const keys = useRef({ up: false, down: false, left: false, right: false });
   const stick = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const sent = useRef('0:0');
+  const pred = useRef<Pred | null>(null);
+  const sprintAsk = useRef(false);
 
-  const sync = () => {
+  const inputDir = (): { x: number; y: number } => {
     const k = keys.current;
     let x = (k.right ? 1 : 0) - (k.left ? 1 : 0) + stick.current.x;
     let y = (k.down ? 1 : 0) - (k.up ? 1 : 0) + stick.current.y;
@@ -115,16 +129,22 @@ export function Chori({ view }: { view: ChoriView }): JSX.Element {
       x /= l;
       y /= l;
     }
+    return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+  };
+
+  const sync = () => {
+    const { x, y } = inputDir();
     const key = `${x.toFixed(2)}:${y.toFixed(2)}`;
     if (key === sent.current) return;
     sent.current = key;
-    api.send('input', { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
+    api.send('input', { x, y });
   };
 
   const sprint = () => {
     const v = snap.current;
     const mine = v.players.find((p) => p.playerId === meId);
     if (v.stage !== 'live' || !mine || serverNow() < mine.sprintReadyAt - 80) return;
+    sprintAsk.current = true;
     api.send('sprint');
   };
 
@@ -242,8 +262,20 @@ export function Chori({ view }: { view: ChoriView }): JSX.Element {
     }
     if (floor) ctx.drawImage(floor, 0, 0);
     ctx.setTransform(dpr * scale, 0, 0, dpr * scale, ctx.getTransform().e, ctx.getTransform().f);
+
+    const v = snap.current;
+    const mine = v.players.find((p) => p.playerId === meId);
+    if (mine && v.stage === 'live') {
+      const holder = v.chori.holder === meId;
+      pred.current = predictRunner(pred.current, mine, v.t, map, inputDir(), holder, sprintAsk.current, dt);
+    } else {
+      pred.current = null;
+    }
+    sprintAsk.current = false;
+
     paint(ctx, {
-      v: snap.current,
+      v,
+      pred: pred.current,
       map,
       smooth: smooth.current,
       things: things.current,
@@ -609,10 +641,96 @@ interface PaintArgs {
   particles: Particle[];
   players: Map<string, PlayerPublic>;
   meId: string | null;
+  pred: Pred | null;
   dt: number;
   scale: number;
   joy: { ox: number; oy: number; x: number; y: number } | null;
   canvas: HTMLCanvasElement;
+}
+
+/**
+ * Avanza el corredor propio con el input local y la misma física del servidor y
+ * lo corrige contra el snapshot. El servidor ve cada input media ida y vuelta
+ * tarde: su estado en `serverT` equivale al nuestro en `serverT - rtt/2`, así
+ * que comparamos contra ese punto del historial y no contra el presente.
+ */
+function predictRunner(
+  p: Pred | null,
+  srv: ChoriPlayer,
+  serverT: number,
+  map: ChoriMap,
+  input: { x: number; y: number },
+  holder: boolean,
+  sprintAsk: boolean,
+  dt: number,
+): Pred {
+  const now = serverNow();
+  if (!p) p = { x: srv.x, y: srv.y, vx: srv.vx, vy: srv.vy, sprintUntil: 0, hist: [] };
+
+  const stunned = now < srv.stunUntil;
+  const hasInput = !stunned && (input.x !== 0 || input.y !== 0);
+  if (sprintAsk && !stunned && now >= srv.sprintReadyAt - 80) {
+    const dx = hasInput ? input.x : Math.cos(srv.a);
+    const dy = hasInput ? input.y : Math.sin(srv.a);
+    const l = Math.hypot(dx, dy) || 1;
+    p.vx = (dx / l) * CH.SPRINT_SPEED;
+    p.vy = (dy / l) * CH.SPRINT_SPEED;
+    p.sprintUntil = now + CH.SPRINT_MS;
+  }
+
+  if (now >= Math.max(p.sprintUntil, srv.sprintUntil)) {
+    if (hasInput) {
+      p.vx += input.x * CH.ACCEL * dt;
+      p.vy += input.y * CH.ACCEL * dt;
+    }
+    const damp = Math.exp(-(hasInput ? CH.DAMP * 0.45 : CH.DAMP) * dt);
+    p.vx *= damp;
+    p.vy *= damp;
+    const max = CH.MAX_SPEED * (holder ? CH.HOLDER_SPEED : 1);
+    const sp = Math.hypot(p.vx, p.vy);
+    if (sp > max) {
+      const k = Math.max(max / sp, Math.exp(-5 * dt));
+      p.vx *= k;
+      p.vy *= k;
+    }
+  }
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+  pushOut(p, CH.PLAYER_R, map, 0.25);
+
+  p.hist.push({ t: now, x: p.x, y: p.y, vx: p.vx, vy: p.vy });
+  while (p.hist.length > 2 && p.hist[0].t < now - 1500) p.hist.shift();
+
+  const at = serverT - currentRtt() / 2;
+  let past = p.hist[0];
+  for (const h of p.hist) {
+    if (h.t > at) break;
+    past = h;
+  }
+  const ex = srv.x - past.x;
+  const ey = srv.y - past.y;
+  if (Math.hypot(ex, ey) > 140) {
+    // Atropello, empujón fuerte o predicción perdida: manda el servidor.
+    return { x: srv.x, y: srv.y, vx: srv.vx, vy: srv.vy, sprintUntil: 0, hist: [] };
+  }
+  // Corrección suave; corremos el historial también para no aplicar el mismo
+  // error dos veces mientras no llega el próximo snapshot.
+  const c = Math.min(1, dt * 8);
+  const cx = ex * c;
+  const cy = ey * c;
+  const cvx = (srv.vx - past.vx) * c;
+  const cvy = (srv.vy - past.vy) * c;
+  p.x += cx;
+  p.y += cy;
+  p.vx += cvx;
+  p.vy += cvy;
+  for (const h of p.hist) {
+    h.x += cx;
+    h.y += cy;
+    h.vx += cvx;
+    h.vy += cvy;
+  }
+  return p;
 }
 
 function follow(s: Smooth | null, x: number, y: number, vx: number, vy: number, elapsed: number, dt: number): Smooth {
@@ -626,7 +744,7 @@ function follow(s: Smooth | null, x: number, y: number, vx: number, vy: number, 
 }
 
 function paint(ctx: CanvasRenderingContext2D, a: PaintArgs): void {
-  const { v, map, smooth, things, particles, players, meId, dt, scale, joy, canvas } = a;
+  const { v, map, smooth, things, particles, players, meId, pred, dt, scale, joy, canvas } = a;
   const now = serverNow();
   const elapsed = Math.max(0, Math.min(0.1, (now - v.t) / 1000));
 
@@ -649,6 +767,10 @@ function paint(ctx: CanvasRenderingContext2D, a: PaintArgs): void {
   const ordered = [...v.players].sort((x, y) => (x.playerId === meId ? 1 : 0) - (y.playerId === meId ? 1 : 0));
   for (const p of ordered) {
     const s = follow(smooth.get(p.playerId) ?? null, p.x, p.y, p.vx, p.vy, elapsed, dt);
+    if (p.playerId === meId && pred) {
+      s.x = pred.x;
+      s.y = pred.y;
+    }
     smooth.set(p.playerId, s);
     drawRunner(ctx, p, s, players.get(p.playerId), p.playerId === meId, v.chori.holder === p.playerId, now);
   }

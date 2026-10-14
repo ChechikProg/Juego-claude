@@ -146,3 +146,37 @@ export class TimerBag {
     this.intervals.clear();
   }
 }
+
+/**
+ * Copia de la vista con los decimales recortados (nunca toca el estado del
+ * juego). Un float crudo viaja con ~17 dígitos: recortarlos achica mucho cada
+ * snapshot, que con el servidor lejos es latencia directa. La precisión es
+ * relativa al tamaño, así ángulos y fracciones chicas no pierden nada visible.
+ */
+export function compact<T>(value: T): T {
+  return shrink(value) as T;
+}
+
+function shrink(v: unknown): unknown {
+  if (typeof v === 'number') {
+    if (Number.isInteger(v) || !Number.isFinite(v)) return v;
+    const a = Math.abs(v);
+    const k = a >= 1000 ? 10 : a >= 100 ? 100 : a >= 1 ? 1000 : 10000;
+    return Math.round(v * k) / k;
+  }
+  if (v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) {
+    const out = new Array(v.length);
+    for (let i = 0; i < v.length; i++) out[i] = shrink(v[i]);
+    return out;
+  }
+  // Sólo objetos planos: buffers, fechas y demás pasan tal cual.
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) return v;
+  const out: Record<string, unknown> = {};
+  for (const key in v as Record<string, unknown>) {
+    const x = (v as Record<string, unknown>)[key];
+    if (x !== undefined) out[key] = shrink(x);
+  }
+  return out;
+}

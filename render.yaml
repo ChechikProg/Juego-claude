@@ -3,6 +3,8 @@ services:
     name: partidazo
     runtime: node
     plan: free
+    # Mismo lugar que el servicio ya creado; Render no deja mudar la región después.
+    region: virginia
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /api/health

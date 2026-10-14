@@ -5,11 +5,17 @@ import type {
 } from '../shared/types';
 import { getGame } from './games/registry';
 import type { GameContext, GameModule, GamePlayer, ResultRow } from './games/kit';
-import { TimerBag, buildStandings, roomCode, sanitizeText, shortId, uid } from './util';
+import { TimerBag, buildStandings, compact, roomCode, sanitizeText, shortId, uid } from './util';
 
 const RESULTS_MS = 13_000;
-/** agrupa los envíos de estado de juego para no saturar el socket */
-const FLUSH_MS = 40;
+/**
+ * Frecuencia de envío de los minijuegos con tick. El estado sale justo después
+ * de simular (sin esperas de por medio) y, si llegó un input, en el tick
+ * siguiente aunque no toque: la respuesta no espera al reloj de envío.
+ */
+const SEND_HZ = 30;
+/** si el socket sigue ocupado con el frame anterior, reintentamos en esto */
+const BUSY_RETRY_MS = 12;
 /** una sala sin nadie conectado se borra después de esto */
 const EMPTY_TTL_MS = 3 * 60_000;
 
@@ -52,8 +58,12 @@ export class Room {
   private introReady = new Set<string>();
   private index = 0;
   private flushTimer: NodeJS.Timeout | null = null;
+  private flushImmediate: NodeJS.Immediate | null = null;
   private dirtyAll = false;
   private dirtyIds = new Set<string>();
+  /** mandaron input desde el último envío: el próximo tick les responde ya */
+  private urgentIds = new Set<string>();
+  private lastSendAt = 0;
   emptySince: number | null = null;
 
   constructor(private io: Server, code: string) {
@@ -291,13 +301,21 @@ export class Room {
 
     if (mod.tickHz) {
       const every = Math.max(8, Math.round(1000 / mod.tickHz));
+      const sendEvery = 1000 / Math.min(SEND_HZ, mod.tickHz);
       this.active.tick = this.gameTimers.every(every, () => {
         const a = this.active;
         if (!a || a.finished) return;
-        a.mod.tick?.(a.ctx, a.state, every, Date.now());
+        const now = Date.now();
+        a.mod.tick?.(a.ctx, a.state, every, now);
+        // Se manda con el estado recién simulado. Medio tick de tolerancia para
+        // que el jitter de setInterval no haga saltear envíos.
+        if (this.active !== a || !this.isDirty()) return;
+        if (now - this.lastSendAt >= sendEvery - every / 2) this.flushNow();
+        else if (this.urgentIds.size) this.flushNow(this.urgentIds);
       });
     }
     this.pushGame();
+    if (mod.tickHz) this.flushNow();
   }
 
   private stopGame(): void {
@@ -372,6 +390,7 @@ export class Room {
     } catch (err) {
       console.error(`[game:${a.gameId}]`, err);
     }
+    if (a.mod.tickHz) this.urgentIds.add(playerId);
   }
 
   private makeContext(gameId: GameId): GameContext {
@@ -462,45 +481,85 @@ export class Room {
     if (sid) this.io.to(sid).emit('toast', { text, kind });
   }
 
-  /** Marca la vista de juego como sucia; el envío real se agrupa. */
+  /**
+   * Marca la vista de juego como sucia. En los juegos con tick la manda el
+   * propio tick; en el resto sale en este mismo giro del event loop (agrupando
+   * lo que se tocó junto), sin sumar espera.
+   */
   pushGame(playerId?: string): void {
     if (!this.active) return;
     if (playerId) this.dirtyIds.add(playerId);
     else this.dirtyAll = true;
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
-      try {
-        this.flushGame();
-      } catch (err) {
-        console.error('[flush]', err);
-      }
-    }, FLUSH_MS);
+    if (this.active.tick) return;
+    if (this.flushImmediate || this.flushTimer) return;
+    this.flushImmediate = setImmediate(() => {
+      this.flushImmediate = null;
+      this.flushNow();
+    });
   }
 
-  private flushGame(): void {
+  private isDirty(): boolean {
+    return this.dirtyAll || this.dirtyIds.size > 0;
+  }
+
+  /** Manda lo pendiente; con `only`, sólo a esos jugadores (el resto sigue pendiente). */
+  private flushNow(only?: Set<string>): void {
+    try {
+      this.flushGame(only);
+    } catch (err) {
+      console.error('[flush]', err);
+    }
+  }
+
+  private flushGame(only?: Set<string>): void {
     const a = this.active;
     if (!a) {
       this.dirtyAll = false;
       this.dirtyIds.clear();
+      this.urgentIds.clear();
       return;
     }
-    const targets = this.dirtyAll
-      ? [...this.players.values()]
-      : [...this.dirtyIds].map((id) => this.players.get(id)).filter((p): p is Player => !!p);
-    this.dirtyAll = false;
-    this.dirtyIds.clear();
+    let ids: string[];
+    if (only) {
+      ids = [...only];
+      for (const id of ids) this.dirtyIds.delete(id);
+    } else {
+      ids = this.dirtyAll ? [...this.players.keys()] : [...this.dirtyIds];
+      this.dirtyAll = false;
+      this.dirtyIds.clear();
+      this.lastSendAt = Date.now();
+    }
+    this.urgentIds.clear();
 
-    for (const p of targets) {
-      if (!p.socketId) continue;
+    let busy = false;
+    for (const id of ids) {
+      const p = this.players.get(id);
+      if (!p?.socketId) continue;
+      const sock = this.io.sockets.sockets.get(p.socketId);
+      if (!sock) continue;
+      // Si el frame anterior todavía no salió, no apilamos otro: queda pendiente
+      // y se manda el más nuevo apenas se libere. Encolar estados viejos sólo
+      // suma lag cuando la conexión se atora.
+      if (socketBusy(sock)) {
+        this.dirtyIds.add(id);
+        busy = true;
+        continue;
+      }
       let view: unknown;
       try {
-        view = a.mod.view(a.ctx, a.state, p.id);
+        view = compact(a.mod.view(a.ctx, a.state, id));
       } catch (err) {
         console.error(`[view:${a.gameId}]`, err);
         continue;
       }
-      this.io.to(p.socketId).emit('game:state', { gameId: a.gameId, view });
+      sock.emit('game:state', { gameId: a.gameId, view });
+    }
+    // Sin tick que reintente, reintentamos nosotros.
+    if (busy && !a.tick && !this.flushTimer) {
+      this.flushTimer = setTimeout(() => {
+        this.flushTimer = null;
+        if (this.isDirty()) this.flushNow();
+      }, BUSY_RETRY_MS);
     }
   }
 
@@ -511,7 +570,7 @@ export class Room {
     const a = this.active;
     if (a) {
       try {
-        socket.emit('game:state', { gameId: a.gameId, view: a.mod.view(a.ctx, a.state, playerId) });
+        socket.emit('game:state', { gameId: a.gameId, view: compact(a.mod.view(a.ctx, a.state, playerId)) });
       } catch (err) {
         console.error('[sync]', err);
       }
@@ -522,8 +581,16 @@ export class Room {
     this.stopGame();
     this.matchTimers.clear();
     if (this.flushTimer) clearTimeout(this.flushTimer);
+    if (this.flushImmediate) clearImmediate(this.flushImmediate);
     this.flushTimer = null;
+    this.flushImmediate = null;
   }
+}
+
+/** El transporte todavía está escribiendo lo anterior (o tiene cola). */
+function socketBusy(sock: Socket): boolean {
+  const conn = sock.conn as unknown as { transport?: { writable?: boolean }; writeBuffer?: unknown[] };
+  return conn.transport?.writable === false || (conn.writeBuffer?.length ?? 0) > 0;
 }
 
 /* ── registro global de salas ───────────────────────────────────────────── */
